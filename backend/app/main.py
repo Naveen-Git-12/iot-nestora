@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import vitals, symptoms, reminders, patients
+from app.routes import vitals, symptoms, reminders, patients, risk, nutrition
 
 app = FastAPI(
     title="NESTORA API",
@@ -20,6 +20,8 @@ app.include_router(vitals.router, prefix="/api/vitals", tags=["Vitals"])
 app.include_router(symptoms.router, prefix="/api/symptoms", tags=["Symptoms"])
 app.include_router(reminders.router, prefix="/api/reminders", tags=["Reminders"])
 app.include_router(patients.router, prefix="/api/patients", tags=["Patients"])
+app.include_router(risk.router, prefix="/api/risk", tags=["AI Risk"])
+app.include_router(nutrition.router, prefix="/api/nutrition", tags=["Nutrition"])
 
 
 @app.get("/")

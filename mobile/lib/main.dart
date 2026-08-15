@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'screens/landing_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/vitals_screen.dart';
@@ -27,8 +28,10 @@ class NestoraApp extends StatelessWidget {
         useMaterial3: true,
         fontFamily: 'Roboto',
       ),
-      home: const LoginScreen(),
+      home: const LandingScreen(),
       routes: {
+        '/landing': (context) => const LandingScreen(),
+        '/login': (context) => const LoginScreen(),
         '/home': (context) => const HomeScreen(),
         '/vitals': (context) => const VitalsScreen(),
         '/symptoms': (context) => const SymptomsScreen(),

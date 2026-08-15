@@ -134,6 +134,50 @@ MOCK_SYMPTOMS = {
     ],
 }
 
+MOCK_NUTRITION = {
+    "P001": {
+        "patient_id": "P001",
+        "daily_calories": {"target": 2200, "consumed": 1850},
+        "nutrients": [
+            {"name": "Protein", "current": 68, "target": 75, "unit": "g"},
+            {"name": "Iron", "current": 18, "target": 27, "unit": "mg"},
+            {"name": "Calcium", "current": 900, "target": 1000, "unit": "mg"},
+            {"name": "Folate", "current": 550, "target": 600, "unit": "mcg"},
+            {"name": "Fiber", "current": 22, "target": 28, "unit": "g"},
+        ],
+        "water_glasses": 6,
+        "water_target": 8,
+        "meals": [
+            {
+                "name": "Breakfast",
+                "icon": "🌅",
+                "calories": 450,
+                "items": ["Oatmeal with berries", "Glass of milk", "Almonds"],
+            },
+            {
+                "name": "Lunch",
+                "icon": "☀️",
+                "calories": 620,
+                "items": ["Rice", "Dal", "Vegetable curry", "Curd"],
+            },
+            {
+                "name": "Snack",
+                "icon": "🍎",
+                "calories": 280,
+                "items": ["Banana", "Handful of walnuts", "Apple juice"],
+            },
+            {
+                "name": "Dinner",
+                "icon": "🌙",
+                "calories": 500,
+                "items": ["Chapati", "Paneer tikka", "Salad", "Soup"],
+            },
+        ],
+        "alerts": ["Low iron intake - consider iron-rich foods or supplement"],
+    },
+}
+
+
 MOCK_REMINDERS = [
     {
         "id": "R1",
