@@ -6,7 +6,7 @@ import 'screens/vitals_screen.dart';
 import 'screens/symptoms_screen.dart';
 import 'screens/reminders_screen.dart';
 import 'screens/nutrition_screen.dart';
-import 'services/api_service.dart';
+import 'screens/profile_screen.dart';
 
 void main() {
   runApp(const NestoraApp());
@@ -37,6 +37,7 @@ class NestoraApp extends StatelessWidget {
         '/symptoms': (context) => const SymptomsScreen(),
         '/reminders': (context) => const RemindersScreen(),
         '/nutrition': (context) => const NutritionScreen(),
+        '/profile': (context) => const ProfileScreen(),
       },
     );
   }

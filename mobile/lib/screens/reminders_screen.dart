@@ -16,6 +16,22 @@ class _RemindersScreenState extends State<RemindersScreen> {
     {'icon': Icons.medication, 'title': 'Prenatal Vitamins', 'msg': 'Take folic acid + calcium supplement', 'time': '8:00 PM', 'type': 'medication', 'recurring': true, 'done': false, 'color': const Color(0xFFEC4899)},
   ];
 
+  static const Map<String, IconData> _typeIcons = {
+    'medication': Icons.medication,
+    'hydration': Icons.water_drop,
+    'appointment': Icons.calendar_today,
+    'nutrition': Icons.restaurant,
+    'general': Icons.alarm,
+  };
+
+  static const Map<String, Color> _typeColors = {
+    'medication': Color(0xFFEC4899),
+    'hydration': Color(0xFF3B82F6),
+    'appointment': Color(0xFF10B981),
+    'nutrition': Color(0xFFF59E0B),
+    'general': Color(0xFF8B5CF6),
+  };
+
   @override
   Widget build(BuildContext context) {
     final pending = _reminders.where((r) => !r['done']).toList();
@@ -54,13 +70,43 @@ class _RemindersScreenState extends State<RemindersScreen> {
             if (pending.isNotEmpty) ...[
               const Text('Today', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF7D6B82))),
               const SizedBox(height: 10),
-              ...pending.map((r) => _reminderCard(r)),
+              ...pending.map((r) => Dismissible(
+                    key: ValueKey(r['title'] + r['time']),
+                    direction: DismissDirection.endToStart,
+                    background: Container(
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.only(right: 20),
+                      decoration: BoxDecoration(
+                          color: Colors.red.shade400,
+                          borderRadius: BorderRadius.circular(14)),
+                      child:
+                          const Icon(Icons.delete_outline, color: Colors.white),
+                    ),
+                    onDismissed: (_) =>
+                        setState(() => _reminders.remove(r)),
+                    child: _reminderCard(r),
+                  )),
             ],
             if (completed.isNotEmpty) ...[
               const SizedBox(height: 20),
               const Text('Completed', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF7D6B82))),
               const SizedBox(height: 10),
-              ...completed.map((r) => _reminderCard(r)),
+              ...completed.map((r) => Dismissible(
+                    key: ValueKey(r['title'] + r['time']),
+                    direction: DismissDirection.endToStart,
+                    background: Container(
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.only(right: 20),
+                      decoration: BoxDecoration(
+                          color: Colors.red.shade400,
+                          borderRadius: BorderRadius.circular(14)),
+                      child:
+                          const Icon(Icons.delete_outline, color: Colors.white),
+                    ),
+                    onDismissed: (_) =>
+                        setState(() => _reminders.remove(r)),
+                    child: _reminderCard(r),
+                  )),
             ],
           ],
         ),
@@ -139,11 +185,18 @@ class _RemindersScreenState extends State<RemindersScreen> {
   }
 
   void _showAddSheet() {
+    final titleCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    TimeOfDay pickedTime = const TimeOfDay(hour: 9, minute: 0);
+    String pickedType = 'medication';
+    bool recurring = true;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (context) => Container(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) => Container(
         padding: EdgeInsets.fromLTRB(24, 20, 24, MediaQuery.of(context).viewInsets.bottom + 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -156,6 +209,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
             const Text('Add Reminder', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             TextField(
+              controller: titleCtrl,
               decoration: InputDecoration(
                 labelText: 'Title',
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -165,6 +219,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
             ),
             const SizedBox(height: 12),
             TextField(
+              controller: descCtrl,
               decoration: InputDecoration(
                 labelText: 'Description',
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -172,12 +227,105 @@ class _RemindersScreenState extends State<RemindersScreen> {
                 fillColor: const Color(0xFFFFF8FC),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () async {
+                      final t = await showTimePicker(
+                          context: context, initialTime: pickedTime);
+                      if (t != null) setSheet(() => pickedTime = t);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF8FC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.access_time,
+                              size: 18, color: Color(0xFFFF2D95)),
+                          const SizedBox(width: 8),
+                          Text(pickedTime.format(context),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: pickedType,
+                    items: _typeIcons.keys
+                        .map((t) => DropdownMenuItem(
+                            value: t,
+                            child: Text(
+                                '${t[0].toUpperCase()}${t.substring(1)}',
+                                style: const TextStyle(fontSize: 14))))
+                        .toList(),
+                    onChanged: (v) =>
+                        setSheet(() => pickedType = v ?? 'medication'),
+                    decoration: InputDecoration(
+                      labelText: 'Type',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      filled: true,
+                      fillColor: const Color(0xFFFFF8FC),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            SwitchListTile(
+              value: recurring,
+              onChanged: (v) => setSheet(() => recurring = v),
+              title: const Text('Repeat daily', style: TextStyle(fontSize: 14)),
+              activeColor: const Color(0xFFFF2D95),
+              contentPadding: EdgeInsets.zero,
+            ),
+            const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () {
+                  final title = titleCtrl.text.trim();
+                  if (title.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Please enter a title')),
+                    );
+                    return;
+                  }
+                  setState(() {
+                    _reminders.insert(0, {
+                      'icon': _typeIcons[pickedType]!,
+                      'title': title,
+                      'msg': descCtrl.text.trim().isEmpty
+                          ? 'Reminder'
+                          : descCtrl.text.trim(),
+                      'time': pickedTime.format(context),
+                      'type': pickedType,
+                      'recurring': recurring,
+                      'done': false,
+                      'color': _typeColors[pickedType]!,
+                    });
+                  });
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Reminder added'),
+                      backgroundColor: Color(0xFFFF2D95),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFFF2D95),
                   foregroundColor: Colors.white,
@@ -187,6 +335,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
               ),
             ),
           ],
+        ),
         ),
       ),
     );

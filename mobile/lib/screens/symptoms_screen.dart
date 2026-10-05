@@ -16,7 +16,7 @@ class _SymptomsBody extends StatefulWidget {
 
 class _SymptomsBodyState extends State<_SymptomsBody> {
   int _selectedFilter = 0;
-  final _filters = ['All', 'Headache', 'Swelling', 'Nausea', 'Fatigue', 'Pain'];
+  final _filters = ['All', 'Headache', 'Swelling', 'Nausea', 'Fatigue', 'Back Pain', 'Mood'];
 
   final List<_SymptomEntry> _symptoms = [
     _SymptomEntry(
@@ -81,7 +81,24 @@ class _SymptomsBodyState extends State<_SymptomsBody> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => const _LogBottomSheet(),
+      builder: (_) => _LogBottomSheet(
+        onSave: (type, severity, description) {
+          setState(() {
+            _symptoms.insert(
+              0,
+              _SymptomEntry(
+                type: type,
+                severity: severity,
+                description: description.isEmpty
+                    ? 'No description provided.'
+                    : description,
+                timestamp: DateTime.now(),
+                flagged: severity >= 4,
+              ),
+            );
+          });
+        },
+      ),
     );
   }
 
@@ -184,7 +201,30 @@ class _SymptomsBodyState extends State<_SymptomsBody> {
                       itemCount: filtered.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (context, index) =>
-                          _SymptomCard(symptom: filtered[index]),
+                          Dismissible(
+                        key: ValueKey(
+                            '${filtered[index].type.label}-${filtered[index].timestamp}'),
+                        direction: DismissDirection.endToStart,
+                        background: Container(
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 20),
+                          decoration: BoxDecoration(
+                              color: Colors.red.shade400,
+                              borderRadius: BorderRadius.circular(16)),
+                          child: const Icon(Icons.delete_outline,
+                              color: Colors.white),
+                        ),
+                        onDismissed: (_) {
+                          final removed = filtered[index];
+                          setState(() => _symptoms.remove(removed));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('Symptom deleted')),
+                          );
+                        },
+                        child:
+                            _SymptomCard(symptom: filtered[index]),
+                      ),
                     ),
             ),
           ],
@@ -406,7 +446,9 @@ class _SymptomCard extends StatelessWidget {
 // ─── Log Bottom Sheet ───────────────────────────────────────────────────────
 
 class _LogBottomSheet extends StatefulWidget {
-  const _LogBottomSheet();
+  final void Function(_SymptomType type, int severity, String description)
+      onSave;
+  const _LogBottomSheet({required this.onSave});
 
   @override
   State<_LogBottomSheet> createState() => _LogBottomSheetState();
@@ -633,11 +675,16 @@ class _LogBottomSheetState extends State<_LogBottomSheet> {
                 onPressed: _selectedType == null
                     ? null
                     : () {
+                        final type = _selectedType!;
+                        final sev = _severity.round();
+                        final desc =
+                            _descriptionController.text.trim();
+                        widget.onSave(type, sev, desc);
                         Navigator.of(context).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
-                              '${_selectedType!.label} logged successfully',
+                              '${type.label} logged successfully',
                             ),
                             backgroundColor: const Color(0xFFFF2D95),
                             behavior: SnackBarBehavior.floating,

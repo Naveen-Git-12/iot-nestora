@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/session_service.dart';
 
 class ThemeColors {
   static const primary = Color(0xFFFF2D95);
@@ -150,8 +151,9 @@ class CustomTextField extends StatelessWidget {
 
 class GradientButton extends StatelessWidget {
   final VoidCallback onPressed;
+  final bool busy;
 
-  const GradientButton({super.key, required this.onPressed});
+  const GradientButton({super.key, required this.onPressed, this.busy = false});
 
   @override
   Widget build(BuildContext context) {
@@ -174,23 +176,31 @@ class GradientButton extends StatelessWidget {
         ],
       ),
       child: ElevatedButton(
-        onPressed: onPressed,
+        onPressed: busy ? null : onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.transparent,
           shadowColor: Colors.transparent,
+          disabledBackgroundColor: Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
         ),
-        child: const Text(
-          'Get Started',
-          style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-            color: Colors.white,
-            letterSpacing: 0.5,
-          ),
-        ),
+        child: busy
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 2),
+              )
+            : const Text(
+                'Get Started',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  letterSpacing: 0.5,
+                ),
+              ),
       ),
     );
   }
@@ -242,13 +252,18 @@ class FeatureChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        _chip(Icons.lock_outline, 'Safe & Secure'),
-        _chip(Icons.auto_awesome, 'AI Powered'),
-        _chip(Icons.devices, 'IoT Enabled'),
-      ],
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _chip(Icons.lock_outline, 'Safe & Secure'),
+          const SizedBox(width: 8),
+          _chip(Icons.auto_awesome, 'AI Powered'),
+          const SizedBox(width: 8),
+          _chip(Icons.devices, 'IoT Enabled'),
+        ],
+      ),
     );
   }
 
@@ -289,15 +304,67 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
+  bool _checking = true;
+  bool _busy = false;
 
-  void _login() {
-    if (_nameController.text.isNotEmpty && _phoneController.text.isNotEmpty) {
+  @override
+  void initState() {
+    super.initState();
+    _autoLogin();
+  }
+
+  Future<void> _autoLogin() async {
+    final loggedIn = await SessionService.isLoggedIn();
+    if (!mounted) return;
+    if (loggedIn) {
       Navigator.pushReplacementNamed(context, '/home');
+    } else {
+      setState(() => _checking = false);
     }
   }
 
   @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _login() async {
+    final name = _nameController.text.trim();
+    final phone = _phoneController.text.trim();
+    if (name.isEmpty || phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter your name and phone number')),
+      );
+      return;
+    }
+    if (phone.length < 7) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid phone number')),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    final existing = await SessionService.loadProfile();
+    final week = (existing['week'] as int?) ?? 28;
+    final due = (existing['due'] as String?) ?? 'Sep 15, 2026';
+    final emergency = (existing['emergency'] as String?) ?? '';
+    await SessionService.saveProfile(
+        name: name, phone: phone, week: week, due: due, emergency: emergency);
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, '/home');
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_checking) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: ThemeColors.primary),
+        ),
+      );
+    }
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -368,7 +435,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             keyboardType: TextInputType.phone,
                           ),
                           const SizedBox(height: 24),
-                          GradientButton(onPressed: _login),
+                          GradientButton(
+                              onPressed: _busy ? () {} : _login,
+                              busy: _busy),
                           const SizedBox(height: 16),
                           const TrustMessage(),
                           const SizedBox(height: 16),

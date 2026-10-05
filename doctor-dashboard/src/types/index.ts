@@ -21,6 +21,12 @@ export interface Vital {
   steps: number;
   source: string;
   timestamp: string;
+  // Live wearable overlay (present when Flutter gateway POSTed fresh data)
+  live?: boolean;
+  device_id?: string;
+  signal_quality?: number;
+  fall_candidate?: boolean;
+  live_at?: string;
 }
 
 export interface Symptom {

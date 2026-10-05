@@ -25,7 +25,7 @@ function App() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [vitals, setVitals] = useState<Vital[]>([]);
   const [symptoms, setSymptoms] = useState<Symptom[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   useEffect(() => {
     fetchPatients()
@@ -252,7 +252,19 @@ function App() {
               </button>
               <h1 className="detail-patient-name">{selectedPatient.name}</h1>
               <span className={`risk-badge ${selectedPatient.risk_level}`}>{selectedPatient.risk_level} risk</span>
+              {latestVital?.live && (
+                <span className="risk-badge live-device" title={`Wearable sync: ${latestVital.live_at ?? 'just now'}`}>
+                  ● LIVE DEVICE
+                </span>
+              )}
             </div>
+            {latestVital?.live && (
+              <p className="live-sync-note">
+                Last wearable sync: {latestVital.live_at ? new Date(latestVital.live_at).toLocaleTimeString() : 'just now'}
+                {latestVital.signal_quality != null && ` · signal ${latestVital.signal_quality}/100`}
+                {latestVital.fall_candidate && ' · possible sudden movement detected'}
+              </p>
+            )}
 
             <div className="info-grid">
               <div className="info-card">
