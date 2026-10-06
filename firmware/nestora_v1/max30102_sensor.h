@@ -7,8 +7,8 @@
 //
 // Pipeline (proven LED config: brightness 60, red+IR @100 Hz,
 // both amplitudes 0x24, shared bus SDA GPIO12/SCL GPIO13):
-//   1. 200-sample blocks (2 s), recomputed every 100 new samples
-//      (50% overlap => fresh answer every ~1 s like fitness watches)
+//   1. 100-sample blocks (1 s, non-overlapping — exactly what the
+//      Maxim routine is designed for)
 //   2. Maxim peak-interval HR + SpO2, validity-gated
 //      (HR 40-200, SpO2 70-100, contact avg-IR >= threshold)
 //   3. MEDIAN of last 8 valid blocks (outlier blocks like a
@@ -46,12 +46,13 @@ class Max30102Sensor {
   int median() const;
   void runMaximBlock();
 
-  static const int BLOCK_N = 200;   // 2 s @100 Hz
-  static const int BLOCK_STEP = 100;  // recompute every 1 s (overlap)
+  // PROVEN block size (matches the working hardware-test sketch and
+  // the Maxim algorithm's design: it always processes its internal
+  // BUFFER_SIZE, so the input block must be exactly this long).
+  static const int BLOCK_N = 100;  // 1 s @100 Hz, non-overlapping
   uint32_t irBuf_[BLOCK_N] = {0};
   uint32_t redBuf_[BLOCK_N] = {0};
   int bufIdx_ = 0;
-  int sinceCompute_ = 0;
   int filled_ = 0;  // real samples collected; compute only when full
   uint64_t blockIrSum_ = 0;
   int blockIrCount_ = 0;

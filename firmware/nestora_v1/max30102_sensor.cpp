@@ -49,7 +49,6 @@ void Max30102Sensor::resetBeatState() {
   histCount_ = 0;
   histIdx_ = 0;
   bufIdx_ = 0;
-  sinceCompute_ = 0;
   filled_ = 0;
   blockIrSum_ = 0;
   blockIrCount_ = 0;
@@ -74,30 +73,23 @@ void Max30102Sensor::update() {
 
   irBuf_[bufIdx_] = lastIr_;
   redBuf_[bufIdx_] = lastRed_;
-  bufIdx_ = (bufIdx_ + 1) % BLOCK_N;
+  bufIdx_++;
   if (filled_ < BLOCK_N) filled_++;
   blockIrSum_ += lastIr_;
   blockIrCount_++;
-  sinceCompute_++;
 
-  // Sliding window: recompute every BLOCK_STEP new samples,
-  // but only once the window holds real data (no zero padding).
-  if (sinceCompute_ >= BLOCK_STEP && filled_ >= BLOCK_N) {
-    sinceCompute_ = 0;
+  // Non-overlapping blocks: compute when full (proven pattern).
+  if (bufIdx_ >= BLOCK_N && filled_ >= BLOCK_N) {
+    bufIdx_ = 0;
     runMaximBlock();
   }
 }
 
 void Max30102Sensor::runMaximBlock() {
-  // Reassemble the last BLOCK_N samples in time order.
-  static uint32_t irWin[BLOCK_N];
-  static uint32_t redWin[BLOCK_N];
-  for (int i = 0; i < BLOCK_N; i++) {
-    int src = (bufIdx_ + i) % BLOCK_N;
-    irWin[i] = irBuf_[src];
-    redWin[i] = redBuf_[src];
-  }
-
+  // Buffers hold exactly one contiguous BLOCK_N block (non-overlapping),
+  // matching the proven hardware-test sketch. Never pass a longer or
+  // reassembled window: the Maxim routine processes its own internal
+  // BUFFER_SIZE and mismatched lengths corrupt the peak statistics.
   uint32_t avgIr =
       blockIrCount_ > 0 ? (uint32_t)(blockIrSum_ / blockIrCount_) : 0;
   blockIrSum_ = 0;
@@ -118,7 +110,7 @@ void Max30102Sensor::runMaximBlock() {
   int32_t spo2 = 0, hr = 0;
   int8_t validSpo2 = 0, validHr = 0;
   maxim_heart_rate_and_oxygen_saturation(
-      irWin, BLOCK_N, redWin, &spo2, &validSpo2, &hr, &validHr);
+      irBuf_, BLOCK_N, redBuf_, &spo2, &validSpo2, &hr, &validHr);
 
   if (validHr && hr >= MIN_VALID_BPM && hr <= MAX_VALID_BPM) {
     if (prevBpm_ > 0) {
