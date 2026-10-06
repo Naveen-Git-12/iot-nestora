@@ -71,16 +71,6 @@ void Max30102Sensor::update() {
   lastIr_ = particleSensor.getIR();
   particleSensor.nextSample();
 
-  // Effective FIFO rate tracker.
-  unsigned long nowRs = millis();
-  if (fifoWindowAt_ == 0) fifoWindowAt_ = nowRs;
-  fifoCount_++;
-  if (nowRs - fifoWindowAt_ >= 1000) {
-    fifoRate_ = fifoCount_;
-    fifoCount_ = 0;
-    fifoWindowAt_ = nowRs;
-  }
-
   irBuf_[bufIdx_] = lastIr_;
   redBuf_[bufIdx_] = lastRed_;
   bufIdx_++;
@@ -193,6 +183,11 @@ int Max30102Sensor::averageBpm() const {
   int med = median();
   if (!contact_ || med < 0) return -1;
   return med;
+}
+
+int Max30102Sensor::buffered() {
+  if (!online_) return 0;
+  return particleSensor.available();
 }
 
 int Max30102Sensor::signalQuality() {

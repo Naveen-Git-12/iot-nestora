@@ -35,6 +35,9 @@ static unsigned long lastBle = 0;
 static unsigned long lastDiag = 0;
 static unsigned long lastRetry = 0;
 static unsigned long fallSetAt = 0;
+static unsigned long loopCount_ = 0;
+static unsigned long loopWinAt_ = 0;
+static int loopRate_ = 0;  // loop() iterations per second (diagnostic)
 
 // Cached at boot: printed in EVERY diag line so the reset cause is
 // visible no matter when the serial reader attaches.
@@ -82,6 +85,7 @@ void setup() {
   Serial.println();
 
   SHARED_BUS.begin(SHARED_SDA, SHARED_SCL);
+  SHARED_BUS.setClock(400000);  // proven sketch runs 400 kHz, not default 100 kHz
 
   Serial.printf("SHARED BUS:\nSDA = GPIO%d\nSCL = GPIO%d\n", SHARED_SDA, SHARED_SCL);
   i2cScan(SHARED_BUS, "SHARED BUS");
@@ -102,11 +106,25 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  // MAX30102: drain up to 8 FIFO samples per loop. The sensor
-  // produces ~100/s but one read per loop only keeps ~10/s, which
-  // stretched block fill (and first HR lock) to 10+ s. Draining in
-  // bursts keeps the pipeline fed at near-production rate.
-  for (int i = 0; i < 8; i++) maxSensor.update();
+  // Loop-rate tracker (proves whether the loop keeps up with the sensor).
+  loopCount_++;
+  if (loopWinAt_ == 0) loopWinAt_ = now;
+  if (now - loopWinAt_ >= 1000) {
+    loopRate_ = (int)loopCount_;
+    loopCount_ = 0;
+    loopWinAt_ = now;
+  }
+
+  // MAX30102: drain the whole FIFO backlog every loop (up to 32).
+  // A fixed small drain lets the 32-deep hardware FIFO overflow
+  // between loops; overflowed gaps make peak intervals meaningless
+  // and block HR swings wildly (107/136/214/187 on one touch).
+  for (int i = 0; i < 32; i++) {
+    int before = maxSensor.buffered();
+    maxSensor.update();
+    if (maxSensor.buffered() == before) break;  // FIFO empty, stop early
+  }
+  loopCount_++;
 
   // Retry offline sensors every 30 s (lets user reseat wires live).
   if (now - lastRetry >= 30000) {
@@ -193,11 +211,11 @@ void loop() {
         maxSensor.currentBpm(), activity.activity(),
         maxSensor.hasContact(), ctx, sizeof(ctx));
     Serial.printf(
-        "IR=%lu RED=%lu BPM=%d AVG=%d fsr=%d | mag=%.2f steps=%lu act=%s rest=%lus "
+        "IR=%lu RED=%lu BPM=%d AVG=%d lps=%d | mag=%.2f steps=%lu act=%s rest=%lus "
         "qual=%d fall=%d ble_adv=%d started=%d clients=%d heap=%lu rst=%s | %s\n",
         (unsigned long)maxSensor.ir(), (unsigned long)maxSensor.red(),
         maxSensor.currentBpm(),
-        maxSensor.averageBpm(), maxSensor.fifoRate(), mpuSensor.magnitude(), activity.steps(),
+        maxSensor.averageBpm(), loopRate_, mpuSensor.magnitude(), activity.steps(),
         activity.activity(), (unsigned long)activity.restSeconds(),
         maxSensor.signalQuality(),
         activity.fallCandidate() ? 1 : 0,
