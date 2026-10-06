@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchPatients, fetchPatient, fetchVitals, fetchSymptoms } from './services/api';
+import { fetchPatients, fetchPatient, fetchVitals, fetchLatestVital, fetchSymptoms } from './services/api';
 import type { Patient, Vital, Symptom } from './types';
 import './App.css';
 
@@ -28,9 +28,23 @@ function App() {
   const [, setLoading] = useState(true);
 
   useEffect(() => {
+    // Live-device view: keep only patients with a fresh wearable
+    // reading (GET .../latest merged with live:true). Mock-only
+    // patients are hidden so the dashboard shows the real device.
     fetchPatients()
-      .then((data) => {
-        setPatients(data);
+      .then(async (data) => {
+        const list = Array.isArray(data) ? data : [];
+        const checks = await Promise.all(
+          list.map(async (p: Patient) => {
+            try {
+              const latest = await fetchLatestVital(p.id);
+              return latest && latest.live === true ? p : null;
+            } catch {
+              return null;
+            }
+          })
+        );
+        setPatients(checks.filter((p): p is Patient => p !== null));
         setLoading(false);
       })
       .catch(console.error);
@@ -107,7 +121,7 @@ function App() {
             <div className="page-header">
               <div>
                 <h1 className="page-title">Dashboard Overview</h1>
-                <p className="page-subtitle">Monitor all patients at a glance</p>
+                <p className="page-subtitle">Live wearable patients only</p>
               </div>
             </div>
 
@@ -200,7 +214,7 @@ function App() {
             <div className="page-header">
               <div>
                 <h1 className="page-title">All Patients</h1>
-                <p className="page-subtitle">{patients.length} patients registered</p>
+                <p className="page-subtitle">{patients.length} live {patients.length === 1 ? 'patient' : 'patients'} connected</p>
               </div>
             </div>
 

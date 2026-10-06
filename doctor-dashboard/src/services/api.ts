@@ -15,6 +15,11 @@ export async function fetchVitals(patientId: string) {
   return res.json();
 }
 
+export async function fetchLatestVital(patientId: string) {
+  const res = await fetch(`${API_BASE}/api/vitals/${patientId}/latest`);
+  return res.json();
+}
+
 export async function fetchSymptoms(patientId: string) {
   const res = await fetch(`${API_BASE}/api/symptoms/${patientId}`);
   return res.json();
