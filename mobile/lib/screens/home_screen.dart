@@ -168,9 +168,23 @@ class _DashboardTabState extends State<_DashboardTab> {
         (_risk['risk_level'] as String? ?? 'low').toLowerCase();
     final riskColor = _riskColor(riskLevel);
     // Prefer fresh BLE wearable values; fall back to API/mock.
-    final hr = (_hasLive && _live!.heartRate != null)
-        ? _live!.heartRate.toString()
-        : _vitals['heart_rate']?.toString() ?? '--';
+    // Wearable connected but no skin contact (or no packet yet):
+    // show a placeholder dash, never a stale or invented number.
+    String hrText;
+    Color hrColor = Colors.red;
+    bool hrLiveDot = false;
+    if (_bleState == BleConnState.connected) {
+      if (_hasLive && _live!.contact && _live!.heartRate != null) {
+        hrText = '${_live!.heartRate} bpm';
+        hrLiveDot = true;
+      } else {
+        hrText = '—';
+        hrColor = Colors.grey;
+      }
+    } else {
+      final fallbackHr = _vitals['heart_rate']?.toString() ?? '--';
+      hrText = '$fallbackHr bpm';
+    }
     final spo2 = _vitals['spo2']?.toString() ?? '--';
     final temp = _vitals['temperature']?.toString() ?? '--';
     final sys = _vitals['systolic_bp']?.toString() ?? '--';
@@ -296,9 +310,9 @@ class _DashboardTabState extends State<_DashboardTab> {
                 crossAxisSpacing: 12,
                 childAspectRatio: 1.4,
                 children: [
-                  _vitalCard('Heart Rate', '$hr bpm', Icons.favorite,
-                      Colors.red,
-                      live: _hasLive && _live!.heartRate != null),
+                  _vitalCard('Heart Rate', hrText, Icons.favorite,
+                      hrColor,
+                      live: hrLiveDot),
                   _vitalCard(
                       'SpO2', '$spo2%', Icons.water_drop, Colors.blue),
                   _vitalCard('Temperature', '$temp°C',
