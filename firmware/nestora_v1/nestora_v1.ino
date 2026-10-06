@@ -190,10 +190,11 @@ void loop() {
         maxSensor.currentBpm(), activity.activity(),
         maxSensor.hasContact(), ctx, sizeof(ctx));
     Serial.printf(
-        "IR=%lu BPM=%d AVG=%d | mag=%.2f steps=%lu act=%s rest=%lus "
+        "IR=%lu RED=%lu BPM=%d AVG=%d fsr=%d | mag=%.2f steps=%lu act=%s rest=%lus "
         "qual=%d fall=%d ble_adv=%d started=%d clients=%d heap=%lu rst=%s | %s\n",
-        (unsigned long)maxSensor.ir(), maxSensor.currentBpm(),
-        maxSensor.averageBpm(), mpuSensor.magnitude(), activity.steps(),
+        (unsigned long)maxSensor.ir(), (unsigned long)maxSensor.red(),
+        maxSensor.currentBpm(),
+        maxSensor.averageBpm(), maxSensor.fifoRate(), mpuSensor.magnitude(), activity.steps(),
         activity.activity(), (unsigned long)activity.restSeconds(),
         maxSensor.signalQuality(),
         activity.fallCandidate() ? 1 : 0,

@@ -38,6 +38,10 @@ class Max30102Sensor {
   // Prototype 0-100 heuristic (contact + IR strength + steadiness).
   int signalQuality();
 
+  // Diagnostics: FIFO samples collected in the last second
+  // (= effective optical sample rate).
+  int fifoRate() const { return fifoRate_; }
+
   unsigned long contactThreshold = 10000UL;  // block-average IR
 
  private:
@@ -76,4 +80,7 @@ class Max30102Sensor {
   int maxBpm_ = -1;
   float beatConsistency_ = 0.0f;
   int prevBpm_ = -1;
+  int fifoRate_ = 0;
+  int fifoCount_ = 0;
+  unsigned long fifoWindowAt_ = 0;
 };

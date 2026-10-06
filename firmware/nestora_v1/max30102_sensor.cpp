@@ -71,6 +71,16 @@ void Max30102Sensor::update() {
   lastIr_ = particleSensor.getIR();
   particleSensor.nextSample();
 
+  // Effective FIFO rate tracker.
+  unsigned long nowRs = millis();
+  if (fifoWindowAt_ == 0) fifoWindowAt_ = nowRs;
+  fifoCount_++;
+  if (nowRs - fifoWindowAt_ >= 1000) {
+    fifoRate_ = fifoCount_;
+    fifoCount_ = 0;
+    fifoWindowAt_ = nowRs;
+  }
+
   irBuf_[bufIdx_] = lastIr_;
   redBuf_[bufIdx_] = lastRed_;
   bufIdx_++;
@@ -111,6 +121,10 @@ void Max30102Sensor::runMaximBlock() {
   int8_t validSpo2 = 0, validHr = 0;
   maxim_heart_rate_and_oxygen_saturation(
       irBuf_, BLOCK_N, redBuf_, &spo2, &validSpo2, &hr, &validHr);
+  // Block verdict (temporary diagnostic; proves why blocks pass/fail).
+  Serial.printf("BLK avgIr=%lu validHr=%d hr=%ld validSpO2=%d spo2=%ld\n",
+                (unsigned long)avgIr, (int)validHr, (long)hr,
+                (int)validSpo2, (long)spo2);
 
   if (validHr && hr >= MIN_VALID_BPM && hr <= MAX_VALID_BPM) {
     if (prevBpm_ > 0) {
