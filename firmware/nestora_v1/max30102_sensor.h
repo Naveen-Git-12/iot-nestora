@@ -2,50 +2,59 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-// MAX30102 driver (PROVEN config from hardware test sketch):
-// shared bus with MPU6050 (SDA GPIO12 / SCL GPIO13, addr 0x57),
-// LED brightness 60, red+IR mode @100 Hz, both amplitudes 0x24.
-// Block-based Maxim algorithm (HR + SpO2 with validity flags),
-// collected non-blockingly: one FIFO sample per update() call,
-// Maxim runs every 100 samples (~1 s). Validity-gated:
-// HR 40-200, SpO2 70-100, else reported unavailable (never faked).
+// MAX30102 driver — watch-grade resting HR from the optical signal ONLY.
+// No MPU linkage: the MPU is strictly steps/activity/safety.
+//
+// Pipeline (proven LED config: brightness 60, red+IR @100 Hz,
+// both amplitudes 0x24, shared bus SDA GPIO12/SCL GPIO13):
+//   1. 200-sample blocks (2 s), recomputed every 100 new samples
+//      (50% overlap => fresh answer every ~1 s like fitness watches)
+//   2. Maxim peak-interval HR + SpO2, validity-gated
+//      (HR 40-200, SpO2 70-100, contact avg-IR >= threshold)
+//   3. MEDIAN of last 8 valid blocks (outlier blocks like a
+//      motion-spike 187 vanish instead of dragging a mean up)
+//   4. Slew limiter: displayed HR moves max 4 BPM per computation,
+//      because a real heart cannot jump 70 -> 150 in one second.
 class Max30102Sensor {
  public:
   Max30102Sensor();
 
-  // True if the sensor answers. Never crashes when missing.
   bool begin(TwoWire *bus, uint8_t address);
-
-  // Call as often as possible. Drains one FIFO sample per call.
-  void update();
+  void update();  // call as often as possible; one FIFO sample per call
 
   bool online() const { return online_; }
   bool hasContact() const { return contact_; }
   uint32_t ir() const { return lastIr_; }
   uint32_t red() const { return lastRed_; }
 
-  // Valid values, or -1 when unavailable.
+  // Displayed values (-1 when unavailable). currentBpm() is the
+  // median + slew-limited value: stable on skin, no spike display.
   int currentBpm() const;
   int averageBpm() const;
   int spo2() const { return spo2_; }
   int minBpm() const { return minBpm_; }
   int maxBpm() const { return maxBpm_; }
 
-  // Prototype 0-100 heuristic.
+  // Prototype 0-100 heuristic (contact + IR strength + steadiness).
   int signalQuality();
 
   unsigned long contactThreshold = 10000UL;  // block-average IR
 
  private:
   void resetBeatState();
-  void pushAverage(int bpm);
+  void pushBlock(int bpm);
+  int median() const;
   void runMaximBlock();
 
-  static const int BLOCK_N = 100;
+  static const int BLOCK_N = 200;   // 2 s @100 Hz
+  static const int BLOCK_STEP = 100;  // recompute every 1 s (overlap)
   uint32_t irBuf_[BLOCK_N] = {0};
   uint32_t redBuf_[BLOCK_N] = {0};
   int bufIdx_ = 0;
+  int sinceCompute_ = 0;
+  int filled_ = 0;  // real samples collected; compute only when full
   uint64_t blockIrSum_ = 0;
+  int blockIrCount_ = 0;
 
   TwoWire *bus_ = nullptr;
   bool online_ = false;
@@ -54,13 +63,14 @@ class Max30102Sensor {
   uint32_t lastIr_ = 0;
   uint32_t lastRed_ = 0;
 
+  static const int HIST_N = 8;
+  int histBuf_[HIST_N] = {0};
+  int histCount_ = 0;
+  int histIdx_ = 0;
+
+  int displayedBpm_ = -1;  // slew-limited output
   int currentBpm_ = -1;
   int spo2_ = -1;
-  static const int AVG_N = 8;
-  int avgBuf_[AVG_N] = {0};
-  int avgCount_ = 0;
-  int avgIdx_ = 0;
-  int validBlocks_ = 0;
   int minBpm_ = -1;
   int maxBpm_ = -1;
   float beatConsistency_ = 0.0f;
