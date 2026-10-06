@@ -2,19 +2,21 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-// MAX30102 driver — watch-grade resting HR from the optical signal ONLY.
+// MAX30102 driver — resting HR from the optical signal ONLY.
 // No MPU linkage: the MPU is strictly steps/activity/safety.
 //
 // Pipeline (proven LED config: brightness 60, red+IR @100 Hz,
 // both amplitudes 0x24, shared bus SDA GPIO12/SCL GPIO13):
-//   1. 100-sample blocks (1 s, non-overlapping — exactly what the
-//      Maxim routine is designed for)
-//   2. Maxim peak-interval HR + SpO2, validity-gated
-//      (HR 40-200, SpO2 70-100, contact avg-IR >= threshold)
-//   3. MEDIAN of last 8 valid blocks (outlier blocks like a
-//      motion-spike 187 vanish instead of dragging a mean up)
-//   4. Slew limiter: displayed HR moves max 4 BPM per computation,
-//      because a real heart cannot jump 70 -> 150 in one second.
+//   1. 100-sample blocks (1 s) - the length the Maxim routine expects
+//   2. HR from energy-normalised AUTOCORRELATION over the block.
+//      Periodic, not peak-based: an echo inside one beat (dicrotic
+//      notch) cannot form a spurious period, which is what doubled the
+//      rate with Maxim's 40 ms peak detector. Parabolic sub-sample
+//      refinement, gated at corr >= 0.30.
+//   3. SpO2 from Maxim (ratio of ratios), validity-gated 70-100
+//   4. MEDIAN of last 8 valid blocks + slew limiter: displayed HR moves
+//      max 4 BPM per computation because a real heart cannot jump
+//      70 -> 150 in one second.
 class Max30102Sensor {
  public:
   Max30102Sensor();
@@ -47,7 +49,7 @@ class Max30102Sensor {
   void resetBeatState();
   void pushBlock(int bpm);
   int median() const;
-  void runMaximBlock();
+  void runMaximBlock();  // HR via autocorrelation, SpO2 via Maxim
 
   // PROVEN block size (matches the working hardware-test sketch and
   // the Maxim algorithm's design: it always processes its internal

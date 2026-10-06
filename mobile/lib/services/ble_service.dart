@@ -58,13 +58,16 @@ class WearableVitals {
   }
 
   /// Body for POST /api/vitals/live (gateway role: phone -> backend).
+  ///
+  /// SpO2 is deliberately NOT forwarded: the wearable's SpO2 is not yet
+  /// clinically validated (it pegs 96-100), and feeding it into the risk
+  /// engine produced false HIGH/CRITICAL escalation from mock BP.
   Map<String, dynamic> toLivePost(String patientId) => {
         'patient_id': patientId,
         'device_id': deviceId,
         'timestamp': timestamp,
         'heart_rate': heartRate,
         'heart_rate_avg': heartRateAvg,
-        'spo2': spo2,
         'steps': steps,
         'activity': activity,
         'movement': movement,

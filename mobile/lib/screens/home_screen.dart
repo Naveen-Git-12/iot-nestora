@@ -70,6 +70,7 @@ class _DashboardTabState extends State<_DashboardTab> {
   BleConnState _bleState = BleConnState.idle;
   bool _bleBusy = false;
   DateTime? _lastPush;
+  String _emergencyContact = '';
 
   @override
   void initState() {
@@ -98,7 +99,10 @@ class _DashboardTabState extends State<_DashboardTab> {
   /// Live BLE reading: show instantly + forward to backend (throttled).
   Future<void> _onLive(WearableVitals w) async {
     if (!mounted) return;
+    final hadCandidate = _live?.fallCandidate ?? false;
     setState(() => _live = w);
+    // Safety alert: prototype flag only - "possible sudden movement".
+    if (w.fallCandidate && !hadCandidate) _showFallAlert();
     final now = DateTime.now();
     if (_lastPush != null &&
         now.difference(_lastPush!).inSeconds < 5) return;
@@ -106,6 +110,43 @@ class _DashboardTabState extends State<_DashboardTab> {
     final profile = await SessionService.loadProfile();
     await ApiService.postLiveVitals(
         w.toLivePost((profile['patientId'] as String?) ?? 'P001'));
+  }
+
+  void _showFallAlert() {
+    final emergency = _emergencyContact;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded,
+            color: Colors.red, size: 44),
+        title: const Text('Possible sudden movement detected',
+            textAlign: TextAlign.center),
+        content: Text(
+          emergency.isEmpty
+              ? 'Your wearable sensed a sudden movement, then stillness. '
+                  'This is a prototype alert, not a confirmed fall. '
+                  'If you are hurt, contact emergency services.'
+              : 'Your wearable sensed a sudden movement, then stillness. '
+                  'This is a prototype alert, not a confirmed fall.\n\n'
+                  'Emergency contact: $emergency',
+          textAlign: TextAlign.center,
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('I am okay'),
+          ),
+          if (emergency.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Call contact',
+                  style: TextStyle(color: Colors.red)),
+            ),
+        ],
+      ),
+    );
   }
 
   Future<void> _toggleBle() async {
@@ -144,6 +185,7 @@ class _DashboardTabState extends State<_DashboardTab> {
       _name = name.isEmpty ? 'Priya' : name;
       _week = profile['week'] as int? ?? 28;
       _due = profile['due'] as String? ?? 'Sep 15, 2026';
+      _emergencyContact = profile['emergency'] as String? ?? '';
       _vitals = results[0] as Map<String, dynamic>;
       _risk = results[1] as Map<String, dynamic>;
       _loading = false;

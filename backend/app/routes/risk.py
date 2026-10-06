@@ -1,8 +1,16 @@
 from fastapi import APIRouter
-from app.services.mock_data import MOCK_VITALS, MOCK_SYMPTOMS
+from app.services.mock_data import MOCK_VITALS, MOCK_SYMPTOMS, MOCK_PATIENTS
 from app.services.risk_engine import calculate_risk
+from app.services.live_store import get_live, merge_into_vitals
 
 router = APIRouter()
+
+
+def _patient_week(patient_id: str):
+    for p in MOCK_PATIENTS:
+        if p["id"] == patient_id:
+            return p.get("gestational_week")
+    return None
 
 
 @router.get("/{patient_id}")
@@ -13,8 +21,14 @@ def get_risk(patient_id: str):
     if not vitals_list:
         return {"risk_level": "low", "score": 0, "factors": ["No data available"], "recommendation": "Start monitoring to get risk assessment."}
 
-    latest_vitals = vitals_list[0]
-    return calculate_risk(latest_vitals, symptoms_list)
+    # Score the live wearable reading when one is fresh, so the badge
+    # reflects the real device instead of stale mock numbers.
+    live = get_live(patient_id)
+    latest_vitals = (
+        merge_into_vitals(live, vitals_list[0]) if live else vitals_list[0]
+    )
+    return calculate_risk(latest_vitals, symptoms_list,
+                          _patient_week(patient_id))
 
 
 @router.post("/evaluate")
@@ -27,7 +41,7 @@ def evaluate_risk(data: dict):
         return {"risk_level": "low", "score": 0, "factors": ["No data"], "recommendation": "No data available."}
 
     latest_vitals = vitals_list[0]
-    return calculate_risk(latest_vitals, symptoms_list)
+    return calculate_risk(latest_vitals, symptoms_list, _patient_week(patient_id))
 
 
 @router.post("/assess")
