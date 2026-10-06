@@ -3,19 +3,24 @@
 // ============================================================
 // NESTORA V1 — central configuration
 // ESP32-S3 Super Mini + MAX30102 + MPU6050
-// Two SEPARATE I2C buses. Do NOT combine. Do NOT remap GPIOs.
+// SHARED I2C bus (proven on hardware): BOTH sensors on
+// SDA GPIO12 / SCL GPIO13. MAX addr 0x57, MPU addr 0x68.
+// (Separate buses were tried; the shared bus is what the
+// working hardware test uses. Do NOT remap without retest.)
 // ============================================================
 
-// ---- MPU6050 bus (bus 0) ----
-// ESP32-S3 GPIO12 -> MPU SDA, GPIO13 -> MPU SCL
-#define MPU_SDA 12
-#define MPU_SCL 13
+// ---- Shared I2C bus (bus 0) ----
+#define SHARED_SDA 12
+#define SHARED_SCL 13
+
+// ---- MPU6050 ----
+#define MPU_SDA SHARED_SDA
+#define MPU_SCL SHARED_SCL
 #define MPU_ADDRESS 0x68
 
-// ---- MAX30102 bus (bus 1) ----
-// ESP32-S3 GPIO8 -> MAX SDA, GPIO9 -> MAX SCL
-#define MAX_SDA 8
-#define MAX_SCL 9
+// ---- MAX30102 ----
+#define MAX_SDA SHARED_SDA
+#define MAX_SCL SHARED_SCL
 #define MAX_ADDRESS 0x57
 
 // ---- Misc ----

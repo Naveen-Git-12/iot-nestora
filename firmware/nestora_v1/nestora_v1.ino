@@ -18,8 +18,7 @@
 #include "health_engine.h"
 #include "ble_service.h"
 
-TwoWire MPU_BUS = TwoWire(0);
-TwoWire MAX_BUS = TwoWire(1);
+TwoWire SHARED_BUS = TwoWire(0);
 
 static Max30102Sensor maxSensor;
 static Mpu6050Sensor mpuSensor;
@@ -34,6 +33,8 @@ static unsigned long lastActivity = 0;
 static unsigned long lastHr = 0;
 static unsigned long lastBle = 0;
 static unsigned long lastDiag = 0;
+static unsigned long lastRetry = 0;
+static unsigned long fallSetAt = 0;
 
 static void i2cScan(TwoWire &bus, const char *label) {
   Serial.printf("[%s] scanning...\n", label);
@@ -59,17 +60,14 @@ void setup() {
   Serial.println("MCU: ESP32-S3 Super Mini");
   Serial.println();
 
-  MPU_BUS.begin(MPU_SDA, MPU_SCL);
-  MAX_BUS.begin(MAX_SDA, MAX_SCL);
+  SHARED_BUS.begin(SHARED_SDA, SHARED_SCL);
 
-  Serial.printf("MPU BUS:\nSDA = GPIO%d\nSCL = GPIO%d\n", MPU_SDA, MPU_SCL);
-  i2cScan(MPU_BUS, "MPU BUS");
-  mpuOnline = mpuSensor.begin(&MPU_BUS, MPU_ADDRESS);
+  Serial.printf("SHARED BUS:\nSDA = GPIO%d\nSCL = GPIO%d\n", SHARED_SDA, SHARED_SCL);
+  i2cScan(SHARED_BUS, "SHARED BUS");
+  mpuOnline = mpuSensor.begin(&SHARED_BUS, MPU_ADDRESS);
   Serial.println(mpuOnline ? "MPU6050 ONLINE" : "MPU6050 OFFLINE");
 
-  Serial.printf("MAX BUS:\nSDA = GPIO%d\nSCL = GPIO%d\n", MAX_SDA, MAX_SCL);
-  i2cScan(MAX_BUS, "MAX BUS");
-  maxOnline = maxSensor.begin(&MAX_BUS, MAX_ADDRESS);
+  maxOnline = maxSensor.begin(&SHARED_BUS, MAX_ADDRESS);
   Serial.println(maxOnline ? "MAX30102 ONLINE" : "MAX30102 OFFLINE");
 
   ble.begin();
@@ -85,6 +83,31 @@ void loop() {
 
   // MAX30102: poll every loop (FIFO drain + beat detect). No-op offline.
   maxSensor.update();
+
+  // Retry offline sensors every 30 s (lets user reseat wires live).
+  if (now - lastRetry >= 30000) {
+    lastRetry = now;
+    if (!mpuOnline) {
+      mpuOnline = mpuSensor.begin(&SHARED_BUS, MPU_ADDRESS);
+      if (mpuOnline) Serial.println("MPU6050 ONLINE (retry)");
+    }
+    if (!maxOnline) {
+      maxOnline = maxSensor.begin(&SHARED_BUS, MAX_ADDRESS);
+      if (maxOnline) Serial.println("MAX30102 ONLINE (retry)");
+    }
+  }
+
+  // Auto-clear a latched fall candidate after 60 s (fresh events re-latch).
+  if (activity.fallCandidate()) {
+    if (fallSetAt == 0) {
+      fallSetAt = now;
+    } else if (now - fallSetAt > 60000) {
+      activity.clearFallCandidate();
+      fallSetAt = 0;
+    }
+  } else {
+    fallSetAt = 0;
+  }
 
   // MPU6050 @ ~40 Hz
   if (now - lastMpu >= MPU_SAMPLE_MS) {
@@ -112,7 +135,7 @@ void loop() {
     r.timestamp = now;
     r.heart_rate = maxOnline ? maxSensor.currentBpm() : -1;
     r.heart_rate_avg = maxOnline ? maxSensor.averageBpm() : -1;
-    r.spo2 = -1;  // not reliably measurable yet -> null, never faked
+    r.spo2 = maxOnline ? maxSensor.spo2() : -1;  // Maxim-validated or null
     r.steps = activity.steps();
     strncpy(r.activity, activity.activity(), sizeof(r.activity));
     r.activity[sizeof(r.activity) - 1] = '\0';
@@ -147,12 +170,14 @@ void loop() {
         maxSensor.hasContact(), ctx, sizeof(ctx));
     Serial.printf(
         "IR=%lu BPM=%d AVG=%d | mag=%.2f steps=%lu act=%s rest=%lus "
-        "qual=%d fall=%d | %s\n",
+        "qual=%d fall=%d ble_adv=%d clients=%d heap=%lu | %s\n",
         (unsigned long)maxSensor.ir(), maxSensor.currentBpm(),
         maxSensor.averageBpm(), mpuSensor.magnitude(), activity.steps(),
         activity.activity(), (unsigned long)activity.restSeconds(),
         maxSensor.signalQuality(),
-        activity.fallCandidate() ? 1 : 0, ctx);
+        activity.fallCandidate() ? 1 : 0,
+        ble.advertising() ? 1 : 0, ble.clients(),
+        (unsigned long)ESP.getFreeHeap(), ctx);
   }
 
   ble.update();

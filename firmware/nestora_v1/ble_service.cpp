@@ -57,6 +57,10 @@ void BleService::update() {
   }
 }
 
+bool BleService::advertising() {
+  return NimBLEDevice::getAdvertising()->isAdvertising();
+}
+
 void BleService::notifyVitals(const char *json) {
   if (pVitals && clients_ > 0) {
     pVitals->setValue((uint8_t *)json, strlen(json));

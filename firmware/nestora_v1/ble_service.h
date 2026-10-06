@@ -16,6 +16,7 @@ class BleService {
   // Publish JSON payload to subscribed phone(s). Safe with no clients.
   void notifyVitals(const char *json);
   int clients() const { return clients_; }
+  bool advertising();
   void setStatus(const char *json);
 
  private:

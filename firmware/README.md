@@ -3,16 +3,14 @@
 Wearable: MAX30102 (HR/PPG) + MPU6050 (accel/gyro).
 Flow: `WEARABLE -> BLE -> Flutter gateway -> FastAPI -> Dashboard`.
 
-## Wiring (TWO separate I2C buses — do not combine)
+## Wiring (SHARED I2C bus — proven on hardware)
 
 | ESP32-S3 | MPU6050 | MAX30102/HW-605 |
 |----------|---------|-----------------|
 | 3V3      | VCC     | VIN             |
 | GND      | GND     | GND             |
-| GPIO12   | SDA     | —               |
-| GPIO13   | SCL     | —               |
-| GPIO8    | —       | SDA             |
-| GPIO9    | —       | SCL             |
+| GPIO12   | SDA     | SDA             |
+| GPIO13   | SCL     | SCL             |
 
 Addresses: MPU6050 `0x68`, MAX30102 `0x57` (both confirmed on hardware).
 
