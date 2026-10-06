@@ -26,7 +26,8 @@ BleService::BleService() { self_ = this; }
 void BleService::begin() {
   NimBLEDevice::init(BLE_DEVICE_NAME);
   NimBLEDevice::setMTU(BLE_PREFERRED_MTU);
-  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+  // NOTE: no setPower call — default TX level. An explicit level
+  // silenced advertising on some S3 units during testing.
 
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(new BleConnCallbacks());
@@ -45,9 +46,16 @@ void BleService::begin() {
 
   svc->start();
 
+  // Name + 128-bit service UUID in the ADV packet itself (not only
+  // scan response) so plain scans see "Nestora-V1" immediately.
+  NimBLEAdvertisementData advData;
+  advData.setName(BLE_DEVICE_NAME);
+  advData.addServiceUUID(BLE_SERVICE_UUID);
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
-  adv->addServiceUUID(BLE_SERVICE_UUID);
-  adv->start();
+  adv->setAdvertisementData(advData);
+  adv->setMinInterval(0x20);  // 20 ms
+  adv->setMaxInterval(0x40);  // 40 ms
+  advStarted_ = adv->start();
 }
 
 void BleService::update() {

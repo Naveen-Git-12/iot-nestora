@@ -170,13 +170,14 @@ void loop() {
         maxSensor.hasContact(), ctx, sizeof(ctx));
     Serial.printf(
         "IR=%lu BPM=%d AVG=%d | mag=%.2f steps=%lu act=%s rest=%lus "
-        "qual=%d fall=%d ble_adv=%d clients=%d heap=%lu | %s\n",
+        "qual=%d fall=%d ble_adv=%d started=%d clients=%d heap=%lu | %s\n",
         (unsigned long)maxSensor.ir(), maxSensor.currentBpm(),
         maxSensor.averageBpm(), mpuSensor.magnitude(), activity.steps(),
         activity.activity(), (unsigned long)activity.restSeconds(),
         maxSensor.signalQuality(),
         activity.fallCandidate() ? 1 : 0,
-        ble.advertising() ? 1 : 0, ble.clients(),
+        ble.advertising() ? 1 : 0, ble.advStarted() ? 1 : 0,
+        ble.clients(),
         (unsigned long)ESP.getFreeHeap(), ctx);
   }
 

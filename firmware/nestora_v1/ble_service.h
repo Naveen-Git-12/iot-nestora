@@ -17,10 +17,12 @@ class BleService {
   void notifyVitals(const char *json);
   int clients() const { return clients_; }
   bool advertising();
+  bool advStarted() const { return advStarted_; }
   void setStatus(const char *json);
 
  private:
   int clients_ = 0;
+  bool advStarted_ = false;
   char status_[160] = "{}";
   friend class BleConnCallbacks;
 };
