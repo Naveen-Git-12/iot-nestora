@@ -102,8 +102,11 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  // MAX30102: poll every loop (FIFO drain + beat detect). No-op offline.
-  maxSensor.update();
+  // MAX30102: drain up to 8 FIFO samples per loop. The sensor
+  // produces ~100/s but one read per loop only keeps ~10/s, which
+  // stretched block fill (and first HR lock) to 10+ s. Draining in
+  // bursts keeps the pipeline fed at near-production rate.
+  for (int i = 0; i < 8; i++) maxSensor.update();
 
   // Retry offline sensors every 30 s (lets user reseat wires live).
   if (now - lastRetry >= 30000) {
