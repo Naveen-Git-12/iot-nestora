@@ -36,6 +36,10 @@ static unsigned long lastDiag = 0;
 static unsigned long lastRetry = 0;
 static unsigned long fallSetAt = 0;
 
+// Cached at boot: printed in EVERY diag line so the reset cause is
+// visible no matter when the serial reader attaches.
+static const char *bootReason = "?";
+
 static void i2cScan(TwoWire &bus, const char *label) {
   Serial.printf("[%s] scanning...\n", label);
   for (uint8_t addr = 1; addr < 127; addr++) {
@@ -73,7 +77,8 @@ void setup() {
   Serial.println("         NESTORA V1");
   Serial.println("================================");
   Serial.println("MCU: ESP32-S3 Super Mini");
-  Serial.printf("Reset reason: %s\n", resetReasonName());
+  bootReason = resetReasonName();
+  Serial.printf("Reset reason: %s\n", bootReason);
   Serial.println();
 
   SHARED_BUS.begin(SHARED_SDA, SHARED_SCL);
@@ -186,7 +191,7 @@ void loop() {
         maxSensor.hasContact(), ctx, sizeof(ctx));
     Serial.printf(
         "IR=%lu BPM=%d AVG=%d | mag=%.2f steps=%lu act=%s rest=%lus "
-        "qual=%d fall=%d ble_adv=%d started=%d clients=%d heap=%lu | %s\n",
+        "qual=%d fall=%d ble_adv=%d started=%d clients=%d heap=%lu rst=%s | %s\n",
         (unsigned long)maxSensor.ir(), maxSensor.currentBpm(),
         maxSensor.averageBpm(), mpuSensor.magnitude(), activity.steps(),
         activity.activity(), (unsigned long)activity.restSeconds(),
@@ -194,7 +199,7 @@ void loop() {
         activity.fallCandidate() ? 1 : 0,
         ble.advertising() ? 1 : 0, ble.advStarted() ? 1 : 0,
         ble.clients(),
-        (unsigned long)ESP.getFreeHeap(), ctx);
+        (unsigned long)ESP.getFreeHeap(), bootReason, ctx);
   }
 
   ble.update();
