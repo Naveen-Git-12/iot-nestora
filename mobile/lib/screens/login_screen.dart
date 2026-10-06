@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/session_service.dart';
+import '../services/api_service.dart';
 
 class ThemeColors {
   static const primary = Color(0xFFFF2D95);
@@ -25,10 +26,11 @@ class WelcomePill extends StatelessWidget {
       child: const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.waving_hand, size: 16, color: Color(0xFFF59E0B)),
+          Icon(Icons.verified_user_outlined,
+              size: 16, color: ThemeColors.primary),
           SizedBox(width: 6),
           Text(
-            'Welcome Back',
+            'Registered Patient Access',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -49,7 +51,7 @@ class WelcomeHeading extends StatelessWidget {
     return const Column(
       children: [
         Text(
-          'Your Details',
+          'Sign In',
           style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.w800,
@@ -59,7 +61,8 @@ class WelcomeHeading extends StatelessWidget {
         ),
         SizedBox(height: 6),
         Text(
-          'Let us know who you are',
+          'Enter the details your doctor registered',
+          textAlign: TextAlign.center,
           style: TextStyle(fontSize: 14, color: ThemeColors.subtitle),
         ),
       ],
@@ -193,7 +196,7 @@ class GradientButton extends StatelessWidget {
                     color: Colors.white, strokeWidth: 2),
               )
             : const Text(
-                'Get Started',
+                'Sign In',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w700,
@@ -334,26 +337,66 @@ class _LoginScreenState extends State<LoginScreen> {
     final name = _nameController.text.trim();
     final phone = _phoneController.text.trim();
     if (name.isEmpty || phone.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your name and phone number')),
-      );
+      _showError('Please enter your name and phone number');
       return;
     }
-    if (phone.length < 7) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid phone number')),
-      );
+    if (phone.replaceAll(RegExp(r'\D'), '').length < 10) {
+      _showError('Please enter a valid 10-digit phone number');
       return;
     }
     setState(() => _busy = true);
+
+    // Enrolment-gated: only patients registered by the doctor can sign in.
+    final res = await ApiService.login(name, phone);
+    if (!mounted) return;
+    setState(() => _busy = false);
+
+    if (res['ok'] != true) {
+      _showError((res['error'] as String?) ?? 'Login failed');
+      return;
+    }
+
+    final patientId = (res['patient_id'] as String?) ?? 'P001';
     final existing = await SessionService.loadProfile();
-    final week = (existing['week'] as int?) ?? 28;
-    final due = (existing['due'] as String?) ?? 'Sep 15, 2026';
-    final emergency = (existing['emergency'] as String?) ?? '';
     await SessionService.saveProfile(
-        name: name, phone: phone, week: week, due: due, emergency: emergency);
+      name: (res['name'] as String?) ?? name,
+      phone: (res['phone'] as String?) ?? phone,
+      week: (res['gestational_week'] as num?)?.toInt() ??
+          (existing['week'] as int? ?? 28),
+      due: _formatDue((res['due_date'] as String?) ?? ''),
+      emergency: existing['emergency'] as String? ?? '',
+      age: (res['age'] as num?)?.toInt() ?? (existing['age'] as int? ?? 27),
+      bloodGroup: (res['blood_group'] as String?) ??
+          (existing['bloodGroup'] as String? ?? ''),
+      patientId: patientId,
+    );
     if (!mounted) return;
     Navigator.pushReplacementNamed(context, '/home');
+  }
+
+  static String _formatDue(String iso) {
+    if (iso.isEmpty) return 'Sep 15, 2026';
+    try {
+      final d = DateTime.parse(iso);
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      ];
+      return '${d.day} ${months[d.month - 1]}, ${d.year}';
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: const Color(0xFFD32F2F),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   @override
@@ -438,8 +481,19 @@ class _LoginScreenState extends State<LoginScreen> {
                           GradientButton(
                               onPressed: _busy ? () {} : _login,
                               busy: _busy),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
                           const TrustMessage(),
+                          const SizedBox(height: 10),
+                          Text(
+                            'New here? Ask your doctor to register you — '
+                            'accounts are created by the clinic.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: ThemeColors.subtitle,
+                              height: 1.4,
+                            ),
+                          ),
                           const SizedBox(height: 16),
                           const FeatureChips(),
                         ],

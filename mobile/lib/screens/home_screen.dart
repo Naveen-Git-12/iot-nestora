@@ -57,9 +57,12 @@ class _DashboardTabState extends State<_DashboardTab> {
   String _name = '...';
   int _week = 28;
   String _due = 'Sep 15, 2026';
+  int _age = 27;
   Map<String, dynamic> _vitals = Map.from(ApiService.fallbackVitals);
   Map<String, dynamic> _risk = Map.from(ApiService.fallbackRisk);
   bool _loading = true;
+  bool _bpRecorded = false;
+  String _bpLoggedAt = '';
 
   // BLE wearable gateway (phone -> backend). Null-safe: everything
   // keeps working from mock fallback when the ESP32 is off.
@@ -166,6 +169,12 @@ class _DashboardTabState extends State<_DashboardTab> {
     }
   }
 
+  String get _topFactor {
+    final factors = (_risk['factors'] as List?)?.cast<String>() ?? [];
+    if (factors.isEmpty) return 'Based on your recorded vitals.';
+    return factors.first;
+  }
+
   bool get _hasLive =>
       _live != null &&
       DateTime.now().difference(_live!.receivedAt).inSeconds < 5;
@@ -185,11 +194,235 @@ class _DashboardTabState extends State<_DashboardTab> {
       _name = name.isEmpty ? 'Priya' : name;
       _week = profile['week'] as int? ?? 28;
       _due = profile['due'] as String? ?? 'Sep 15, 2026';
+      _age = profile['age'] as int? ?? 27;
       _emergencyContact = profile['emergency'] as String? ?? '';
       _vitals = results[0] as Map<String, dynamic>;
       _risk = results[1] as Map<String, dynamic>;
+      // BP is manual: reflect whether it was actually recorded, and when.
+      _bpRecorded = _vitals['bp_logged_at'] != null ||
+          (results[0] as Map<String, dynamic>)['bp_source'] != null;
+      _bpLoggedAt = (_vitals['bp_logged_at'] as String?) ?? '';
       _loading = false;
     });
+    _maybeAlertHighRisk();
+  }
+
+  String _lastAlertedLevel = '';
+
+  /// High-risk flow: warn the mother once per level change, naming the
+  /// reason, so the app never contradicts the engine quietly.
+  void _maybeAlertHighRisk() {
+    final level = (_risk['risk_level'] as String? ?? 'low').toLowerCase();
+    final isHigh = level == 'high' || level == 'critical';
+    if (!isHigh || _lastAlertedLevel == level) return;
+    _lastAlertedLevel = level;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          icon: Icon(Icons.warning_amber_rounded,
+              color: level == 'critical' ? Colors.red : Colors.orange,
+              size: 44),
+          title: Text(
+              level == 'critical'
+                  ? 'Critical Risk Detected'
+                  : 'High Risk Detected',
+              textAlign: TextAlign.center),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Reason: ${_topFactor}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 14, height: 1.4)),
+              const SizedBox(height: 12),
+              Text(
+                (_risk['recommendation'] as String?) ?? '',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+            ],
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Understood'),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  static String _shortDate(String iso) {
+    try {
+      final d = DateTime.parse(iso);
+      return '${d.day}/${d.month} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  String _relativeSync() {
+    if (!_hasLive) return 'Not synced - connect band';
+    final secs = DateTime.now().difference(_live!.receivedAt).inSeconds;
+    if (secs < 5) return 'Live now';
+    if (secs < 60) return 'Last synced ${secs}s ago';
+    final mins = secs ~/ 60;
+    if (mins < 60) return 'Last synced ${mins}m ago';
+    return 'Last synced ${mins ~/ 60}h ago';
+  }
+
+  void _showRiskDetails() {
+    final factors = (_risk['factors'] as List?)?.cast<String>() ?? [];
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2))),
+            ),
+            const SizedBox(height: 18),
+            Text('Why this risk level?',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 6),
+            Text(
+              'Week $_week  •  score ${_risk['score'] ?? 0}',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            ...factors.map((f) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.circle, size: 8, color: Color(0xFFFF2D95)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                          child: Text(f,
+                              style: const TextStyle(fontSize: 14, height: 1.4))),
+                    ],
+                  ),
+                )),
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.info_outline, size: 18, color: Colors.blue),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      (_risk['recommendation'] as String?) ?? '',
+                      style: const TextStyle(fontSize: 13, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _logBp() async {
+    final sysCtrl = TextEditingController();
+    final diaCtrl = TextEditingController();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Record blood pressure'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'The wearable does not measure BP. Enter the reading from your '
+              'home BP monitor.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: sysCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration:
+                        const InputDecoration(labelText: 'Systolic'),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('/'),
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: diaCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration:
+                        const InputDecoration(labelText: 'Diastolic'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF2D95),
+                foregroundColor: Colors.white),
+            onPressed: () async {
+              final s = int.tryParse(sysCtrl.text.trim());
+              final d = int.tryParse(diaCtrl.text.trim());
+              if (s == null || d == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Enter both values')));
+                return;
+              }
+              final profile = await SessionService.loadProfile();
+              final res = await ApiService.logBp(
+                  profile['patientId'] as String? ?? 'P001', s, d,
+                  source: 'external_monitor');
+              if (!context.mounted) return;
+              if (res != null) {
+                Navigator.pop(context, true);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text(
+                          'Could not save. Check Server IP in Profile.')),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (saved == true) _load();
   }
 
   Color _riskColor(String level) {
@@ -228,7 +461,6 @@ class _DashboardTabState extends State<_DashboardTab> {
       hrText = '$fallbackHr bpm';
     }
     final spo2 = _vitals['spo2']?.toString() ?? '--';
-    final temp = _vitals['temperature']?.toString() ?? '--';
     final sys = _vitals['systolic_bp']?.toString() ?? '--';
     final dia = _vitals['diastolic_bp']?.toString() ?? '--';
     final progress = (_week / 40).clamp(0.0, 1.0);
@@ -354,16 +586,43 @@ class _DashboardTabState extends State<_DashboardTab> {
                 children: [
                   _vitalCard('Heart Rate', hrText, Icons.favorite,
                       hrColor,
-                      live: hrLiveDot),
-                  _vitalCard(
-                      'SpO2', '$spo2%', Icons.water_drop, Colors.blue),
-                  _vitalCard('Temperature', '$temp°C',
-                      Icons.thermostat, Colors.orange),
-                  _vitalCard('Blood Pressure', '$sys/$dia',
-                      Icons.monitor_heart, Colors.purple),
+                      live: hrLiveDot, source: 'Wearable'),
+                  _vitalCard('SpO2', '$spo2%', Icons.water_drop, Colors.blue,
+                      source: 'Wearable'),
+                  GestureDetector(
+                    onTap: _logBp,
+                    child: _vitalCard(
+                      'Blood Pressure',
+                      _bpRecorded ? '$sys/$dia' : 'Not recorded',
+                      Icons.monitor_heart,
+                      _bpRecorded ? Colors.purple : Colors.grey,
+                      source: _bpRecorded ? 'Manual entry' : 'Tap to record',
+                      sourceColor:
+                          _bpRecorded ? Colors.purple : Colors.orange,
+                    ),
+                  ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.sync, size: 13, color: Colors.grey),
+                  const SizedBox(width: 5),
+                  Text(_relativeSync(),
+                      style: const TextStyle(
+                          fontSize: 11, color: Colors.grey)),
+                  if (_bpLoggedAt.isNotEmpty) ...[
+                    const SizedBox(width: 12),
+                    const Icon(Icons.history,
+                        size: 13, color: Colors.grey),
+                    const SizedBox(width: 5),
+                    Text('BP logged ${_shortDate(_bpLoggedAt)}',
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.grey)),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 16),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
@@ -388,15 +647,32 @@ class _DashboardTabState extends State<_DashboardTab> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                              '${riskLevel[0].toUpperCase()}${riskLevel.substring(1)} Risk',
+                              'Current risk: ${riskLevel[0].toUpperCase()}${riskLevel.substring(1)}',
                               style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   color: riskColor)),
                           Text(
-                              (_risk['recommendation'] as String?) ??
-                                  'AI risk assessment.',
+                              _topFactor,
                               style: const TextStyle(
                                   fontSize: 12, color: Colors.grey)),
+                          const SizedBox(height: 6),
+                          GestureDetector(
+                            onTap: _showRiskDetails,
+                            child: Row(
+                              children: [
+                                Text(
+                                  'View Risk Details',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: riskColor),
+                                ),
+                                const SizedBox(width: 2),
+                                Icon(Icons.chevron_right,
+                                    size: 16, color: riskColor),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -492,7 +768,9 @@ class _DashboardTabState extends State<_DashboardTab> {
 
   static Widget _vitalCard(
       String title, String value, IconData icon, Color color,
-      {bool live = false}) {
+      {bool live = false,
+      String? source,
+      Color? sourceColor}) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -511,14 +789,22 @@ class _DashboardTabState extends State<_DashboardTab> {
         children: [
           Icon(icon, color: color, size: 24),
           const Spacer(),
-          Text(value,
-              style: TextStyle(
-                  fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value,
+                style: TextStyle(
+                    fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+          ),
+          const SizedBox(height: 2),
           Row(
             children: [
-              Text(title,
-                  style:
-                      const TextStyle(fontSize: 11, color: Colors.grey)),
+              Flexible(
+                child: Text(title,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        const TextStyle(fontSize: 11, color: Colors.grey)),
+              ),
               if (live) ...[
                 const SizedBox(width: 4),
                 Container(
@@ -530,6 +816,17 @@ class _DashboardTabState extends State<_DashboardTab> {
               ],
             ],
           ),
+          if (source != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              source,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: sourceColor ?? Colors.grey.shade500),
+            ),
+          ],
         ],
       ),
     );

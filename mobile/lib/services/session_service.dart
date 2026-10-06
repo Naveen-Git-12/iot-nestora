@@ -9,6 +9,8 @@ class SessionService {
   static const _kDue = 'profile_due';
   static const _kEmergency = 'profile_emergency';
   static const _kPatientId = 'patient_id';
+  static const _kAge = 'profile_age';
+  static const _kBloodGroup = 'profile_blood_group';
   static const _kServerIp = 'server_ip';
 
   static Future<void> saveProfile({
@@ -17,6 +19,9 @@ class SessionService {
     int week = 28,
     String due = 'Sep 15, 2026',
     String emergency = '',
+    int age = 27,
+    String bloodGroup = '',
+    String patientId = 'P001',
   }) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_kName, name);
@@ -24,7 +29,9 @@ class SessionService {
     await p.setInt(_kWeek, week);
     await p.setString(_kDue, due);
     await p.setString(_kEmergency, emergency);
-    await p.setString(_kPatientId, 'P001');
+    await p.setInt(_kAge, age);
+    await p.setString(_kBloodGroup, bloodGroup);
+    await p.setString(_kPatientId, patientId);
   }
 
   static Future<Map<String, dynamic>> loadProfile() async {
@@ -35,6 +42,8 @@ class SessionService {
       'week': p.getInt(_kWeek) ?? 28,
       'due': p.getString(_kDue) ?? 'Sep 15, 2026',
       'emergency': p.getString(_kEmergency) ?? '',
+      'age': p.getInt(_kAge) ?? 27,
+      'bloodGroup': p.getString(_kBloodGroup) ?? '',
       'patientId': p.getString(_kPatientId) ?? 'P001',
     };
   }

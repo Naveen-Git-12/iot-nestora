@@ -164,4 +164,37 @@ class ApiService {
   static Future<void> postLiveVitals(Map<String, dynamic> body) async {
     await _post('/api/vitals/live', body);
   }
+
+  // ── Auth ────────────────────────────────────────────────────────────────
+  /// Enrolment-gated login. Returns {ok, error} or {ok:true, patient...}.
+  static Future<Map<String, dynamic>> login(String name, String phone) async {
+    final data = await _post('/api/auth/login',
+        {'name': name, 'phone': phone});
+    if (data is Map<String, dynamic>) return Map<String, dynamic>.from(data);
+    return {
+      'ok': false,
+      'error': 'Could not reach the server. Check the Server IP in Profile.'
+    };
+  }
+
+  // ── Manual BP ───────────────────────────────────────────────────────────
+  static Future<Map<String, dynamic>?> logBp(String patientId, int sysBp,
+      int diaBp, {String source = 'manual'}) async {
+    final data = await _post('/api/vitals/$patientId/bp', {
+      'systolic_bp': sysBp,
+      'diastolic_bp': diaBp,
+      'source': source,
+    });
+    if (data is Map<String, dynamic>) return Map<String, dynamic>.from(data);
+    return null;
+  }
+
+  // ── Week-based nutrition ────────────────────────────────────────────────
+  static Future<Map<String, dynamic>?> getNutritionGuide(String patientId) async {
+    final data = await _get('/api/nutrition/$patientId');
+    if (data is Map<String, dynamic> && data['meals'] != null) {
+      return Map<String, dynamic>.from(data);
+    }
+    return null;
+  }
 }

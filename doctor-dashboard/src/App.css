@@ -681,3 +681,72 @@
 
 .mt-2 { margin-top: 8px; }
 .mt-4 { margin-top: 16px; }
+
+/* ── Enrol modal, toast, risk panel ─────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 34, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 24px;
+}
+.modal {
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+.field input {
+  padding: 9px 11px;
+  border: 1px solid #E4E6EE;
+  border-radius: 9px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.field input:focus { outline: 2px solid #4472C4; border-color: transparent; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+.btn-primary {
+  background: #4472C4; color: #fff; border: none;
+  padding: 10px 16px; border-radius: 9px; font-weight: 600; cursor: pointer;
+}
+.btn-secondary {
+  background: #F1F2F6; color: #40404F; border: none;
+  padding: 10px 16px; border-radius: 9px; font-weight: 600; cursor: pointer;
+}
+.toast {
+  position: fixed; right: 24px; bottom: 24px; z-index: 70;
+  background: #14142B; color: #fff; padding: 14px 18px;
+  border-radius: 12px; display: flex; flex-direction: column; gap: 4px;
+  max-width: 360px; cursor: pointer; box-shadow: 0 12px 30px rgba(0,0,0,.3);
+}
+.toast strong { font-size: 13px; }
+.toast span { font-size: 12px; color: #D5D7E4; }
+.toast-hint { font-size: 10px; color: #8B8DA0; }
+.risk-panel {
+  border-radius: 14px; padding: 16px 18px; margin-bottom: 16px;
+  background: #F5F7FB; border: 1px solid #E4E6EE;
+}
+.risk-panel.low { background: #EAF7F0; border-color: #BFE6D2; }
+.risk-panel.medium { background: #FFF5E9; border-color: #F7D7AC; }
+.risk-panel.high { background: #FDECEC; border-color: #F3C2C2; }
+.risk-panel.critical { background: #FBE3E3; border-color: #EFA6A6; }
+.risk-panel-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.risk-panel-title { font-weight: 700; font-size: 15px; }
+.risk-panel-score { font-size: 12px; color: var(--text-secondary); }
+.risk-factor-list { margin: 0; padding-left: 18px; }
+.risk-factor-list li { font-size: 13px; margin-bottom: 4px; color: #40404F; }
+.risk-panel-rec {
+  margin-top: 10px; padding-top: 10px; font-size: 13px;
+  border-top: 1px solid rgba(0,0,0,.08); color: #40404F;
+}

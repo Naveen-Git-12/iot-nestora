@@ -10,6 +10,9 @@ class NutritionScreen extends StatefulWidget {
 }
 
 class _NutritionScreenState extends State<NutritionScreen> {
+  Map<String, dynamic>? _guide;
+  final Set<String> _chosen = {};
+
   int _calTarget = 2200;
   int _calConsumed = 1700;
   int _water = 6;
@@ -74,6 +77,10 @@ class _NutritionScreenState extends State<NutritionScreen> {
       _waterTarget = (data['water_target'] as num?)?.toInt() ?? 8;
       _loading = false;
     });
+    final guide = await ApiService.getNutritionGuide(
+        (profile['patientId'] as String?) ?? 'P001');
+    if (!mounted) return;
+    setState(() => _guide = guide);
   }
 
   void _toggleWater(int index) {
@@ -164,7 +171,10 @@ class _NutritionScreenState extends State<NutritionScreen> {
                             CircularProgressIndicator(strokeWidth: 2)),
                 ],
               ),
-              const SizedBox(height: 20),
+              if (_guide != null) ...[
+                _recommendations(),
+                const SizedBox(height: 24),
+              ],
               _calorieSummary(),
               const SizedBox(height: 20),
               _nutrientProgress(),
@@ -189,6 +199,186 @@ class _NutritionScreenState extends State<NutritionScreen> {
           ),
         ),
       ),
+    );
+  }
+
+
+  Widget _recommendations() {
+    final g = _guide!;
+    final week = g['gestational_week'];
+    final trimester = (g['trimester'] as String?) ?? '';
+    final focus = ((g['focus'] as List?)?.cast<String>()) ?? [];
+    final meals = ((g['meals'] as List?) ?? [])
+        .whereType<Map>()
+        .toList();
+    final hydration = (g['hydration'] as String?) ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF7B1FA2), Color(0xFFE91E63)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Suggested for Week $week',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(height: 2),
+              Text(trimester,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              if (focus.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                ...focus.map((f) => Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('•  ',
+                            style: TextStyle(color: Colors.white70)),
+                        Expanded(
+                          child: Text(f,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  height: 1.35)),
+                        ),
+                      ],
+                    )),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Pick what suits you — these are suggestions, not a fixed diet.',
+          style: TextStyle(fontSize: 11, color: Color(0xFF7D6B82)),
+        ),
+        const SizedBox(height: 14),
+        ...meals.map((meal) {
+          final name = (meal['meal'] as String?) ?? '';
+          final options = ((meal['options'] as List?) ?? [])
+              .whereType<Map>()
+              .toList();
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.grey.withValues(alpha: 0.07),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3))
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 15)),
+                const SizedBox(height: 8),
+                ...options.map((o) {
+                  final key = '$name|${o['name']}';
+                  final picked = _chosen.contains(key);
+                  return GestureDetector(
+                    onTap: () => setState(() {
+                      if (picked) {
+                        _chosen.remove(key);
+                      } else {
+                        _chosen.add(key);
+                      }
+                    }),
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 7),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: picked
+                            ? const Color(0xFF7B1FA2).withValues(alpha: 0.07)
+                            : const Color(0xFFFFF8FC),
+                        borderRadius: BorderRadius.circular(11),
+                        border: Border.all(
+                          color: picked
+                              ? const Color(0xFF7B1FA2)
+                              : const Color(0xFFFFD3E7),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            picked
+                                ? Icons.check_circle
+                                : Icons.radio_button_unchecked,
+                            size: 17,
+                            color: picked
+                                ? const Color(0xFF7B1FA2)
+                                : const Color(0xFF7D6B82),
+                          ),
+                          const SizedBox(width: 9),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${o['name']}',
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600)),
+                                Text('${o['benefit']}',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF7D6B82))),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          );
+        }),
+        if (hydration.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: const Color(0xFF3B82F6).withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.water_drop,
+                    size: 18, color: Color(0xFF3B82F6)),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(hydration,
+                      style: const TextStyle(fontSize: 12, height: 1.4)),
+                ),
+              ],
+            ),
+          ),
+        if (_chosen.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(
+              'Selected ${_chosen.length} option${_chosen.length == 1 ? '' : 's'} for today',
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF7B1FA2))),
+        ],
+      ],
     );
   }
 

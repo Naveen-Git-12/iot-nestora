@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react';
-import { fetchPatients, fetchPatient, fetchVitals, fetchLatestVital, fetchSymptoms } from './services/api';
-import type { Patient, Vital, Symptom } from './types';
+import { fetchPatients, fetchPatient, fetchVitals, fetchLatestVital, fetchSymptoms, fetchRisk, enrollPatient } from './services/api';
+import type { Patient, Vital, Symptom, RiskAssessment } from './types';
 import './App.css';
 
 const gradients = ['gradient-1', 'gradient-2', 'gradient-3', 'gradient-4', 'gradient-5'];
+
+function formatWhen(iso?: string | null) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
 
 function getVitalTrend(type: string, value: number): { label: string; status: string } {
   const ranges: Record<string, [number, number, number, number]> = {
@@ -19,6 +26,59 @@ function getVitalTrend(type: string, value: number): { label: string; status: st
   return { label: 'Critical', status: 'danger' };
 }
 
+
+function EnrollModal({ onClose, onSubmit }: {
+  onClose: () => void;
+  onSubmit: (p: { name: string; phone: string; age: number; gestational_week: number; blood_group: string }) => void;
+}) {
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [age, setAge] = useState('25');
+  const [week, setWeek] = useState('12');
+  const [blood, setBlood] = useState('');
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2 className="section-title">Enrol a new patient</h2>
+        <p className="page-subtitle" style={{ marginBottom: 16 }}>
+          Creating the patient record that lets her sign in to the app.
+        </p>
+        <div className="form-grid">
+          <label className="field">
+            <span>Full name</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ananya" />
+          </label>
+          <label className="field">
+            <span>Phone (10 digits)</span>
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="9000001234" />
+          </label>
+          <label className="field">
+            <span>Age</span>
+            <input value={age} onChange={(e) => setAge(e.target.value)} inputMode="numeric" />
+          </label>
+          <label className="field">
+            <span>Pregnancy week</span>
+            <input value={week} onChange={(e) => setWeek(e.target.value)} inputMode="numeric" />
+          </label>
+          <label className="field">
+            <span>Blood group</span>
+            <input value={blood} onChange={(e) => setBlood(e.target.value)} placeholder="B+" />
+          </label>
+        </div>
+        <div className="modal-actions">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={() => onSubmit({ name, phone, age: Number(age) || 25, gestational_week: Number(week) || 0, blood_group: blood })}
+          >
+            Register patient
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [view, setView] = useState<'overview' | 'patients' | 'detail'>('overview');
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -26,6 +86,10 @@ function App() {
   const [vitals, setVitals] = useState<Vital[]>([]);
   const [symptoms, setSymptoms] = useState<Symptom[]>([]);
   const [, setLoading] = useState(true);
+  const [risk, setRisk] = useState<RiskAssessment | null>(null);
+  const [showEnroll, setShowEnroll] = useState(false);
+  const [enrollMsg, setEnrollMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     // Live-device view: keep only patients with a fresh wearable
@@ -48,18 +112,38 @@ function App() {
         setLoading(false);
       })
       .catch(console.error);
-  }, []);
+  }, [refreshKey]);
 
   const openPatient = async (id: string) => {
-    const [p, v, s] = await Promise.all([
+    const [p, v, s, r] = await Promise.all([
       fetchPatient(id),
       fetchVitals(id),
       fetchSymptoms(id),
+      fetchRisk(id).catch(() => null),
     ]);
     setSelectedPatient(p);
     setVitals(v);
     setSymptoms(s);
+    setRisk(r);
     setView('detail');
+  };
+
+  const reloadAll = () => setRefreshKey((k) => k + 1);
+
+  const handleEnroll = async (payload: {
+    name: string; phone: string; age: number; gestational_week: number; blood_group: string;
+  }) => {
+    try {
+      const res = await enrollPatient(payload);
+      if (res.error) {
+        setEnrollMsg({ ok: false, text: res.error });
+        return;
+      }
+      setEnrollMsg({ ok: true, text: `Registered ${res.name} (${res.id}). They can now sign in with ${res.phone}.` });
+      reloadAll();
+    } catch {
+      setEnrollMsg({ ok: false, text: 'Could not reach the backend' });
+    }
   };
 
   const highRisk = patients.filter((p) => p.risk_level === 'high').length;
@@ -93,6 +177,14 @@ function App() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             Patients
           </button>
+          <button
+            className="nav-item"
+            onClick={() => { setEnrollMsg(null); setShowEnroll(true); }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+            Enroll Patient
+          </button>
+
           <button
             className={`nav-item ${view === 'detail' ? 'active' : ''}`}
             disabled={!selectedPatient}
@@ -280,6 +372,23 @@ function App() {
               </p>
             )}
 
+            {risk && (
+              <div className={`risk-panel ${risk.risk_level}`}>
+                <div className="risk-panel-head">
+                  <span className="risk-panel-title">
+                    Risk: {risk.risk_level.toUpperCase()}
+                  </span>
+                  <span className="risk-panel-score">score {risk.score} · week {risk.gestational_week ?? '-'}</span>
+                </div>
+                <ul className="risk-factor-list">
+                  {risk.factors.map((f, i) => (
+                    <li key={i}>{f}</li>
+                  ))}
+                </ul>
+                <div className="risk-panel-rec">{risk.recommendation}</div>
+              </div>
+            )}
+
             <div className="info-grid">
               <div className="info-card">
                 <h3>Patient Info</h3>
@@ -312,7 +421,7 @@ function App() {
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                     </div>
                     <div className="vital-value">{latestVital.heart_rate}</div>
-                    <div className="vital-label">Heart Rate (bpm)</div>
+                    <div className="vital-label">Heart Rate (bpm) · wearable</div>
                     <div className={`vital-trend ${getVitalTrend('heart_rate', latestVital.heart_rate).status}`}>
                       {getVitalTrend('heart_rate', latestVital.heart_rate).label}
                     </div>
@@ -322,19 +431,9 @@ function App() {
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
                     </div>
                     <div className="vital-value">{latestVital.spo2}%</div>
-                    <div className="vital-label">SpO2</div>
+                    <div className="vital-label">SpO2 · wearable</div>
                     <div className={`vital-trend ${getVitalTrend('spo2', latestVital.spo2).status}`}>
                       {getVitalTrend('spo2', latestVital.spo2).label}
-                    </div>
-                  </div>
-                  <div className="vital-card temp">
-                    <div className="vital-icon temp">
-                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
-                    </div>
-                    <div className="vital-value">{latestVital.temperature}°</div>
-                    <div className="vital-label">Temperature (°C)</div>
-                    <div className={`vital-trend ${getVitalTrend('temperature', latestVital.temperature).status}`}>
-                      {getVitalTrend('temperature', latestVital.temperature).label}
                     </div>
                   </div>
                   <div className="vital-card bp">
@@ -342,9 +441,11 @@ function App() {
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                     </div>
                     <div className="vital-value">{latestVital.systolic_bp}/{latestVital.diastolic_bp}</div>
-                    <div className="vital-label">Blood Pressure</div>
+                    <div className="vital-label">BP (manual entry)</div>
                     <div className={`vital-trend ${getVitalTrend('bp_systolic', latestVital.systolic_bp).status}`}>
-                      {getVitalTrend('bp_systolic', latestVital.systolic_bp).label}
+                      {latestVital.bp_logged_at
+                        ? `Logged ${formatWhen(latestVital.bp_logged_at)}`
+                        : 'Not recorded by patient'}
                     </div>
                   </div>
                 </div>
@@ -381,7 +482,6 @@ function App() {
                             </span>
                           </td>
                           <td>{v.spo2}%</td>
-                          <td>{v.temperature}°C</td>
                           <td>{v.systolic_bp}/{v.diastolic_bp}</td>
                           <td>{v.steps?.toLocaleString() || '—'}</td>
                         </tr>
@@ -430,6 +530,20 @@ function App() {
           </>
         )}
       </main>
+
+      {showEnroll && (
+        <EnrollModal
+          onClose={() => setShowEnroll(false)}
+          onSubmit={(p) => handleEnroll(p)}
+        />
+      )}
+      {enrollMsg && !showEnroll && (
+        <div className="toast" onClick={() => setEnrollMsg(null)}>
+          <strong>{enrollMsg.ok ? 'Registered' : 'Could not register'}</strong>
+          <span>{enrollMsg.text}</span>
+          <span className="toast-hint">tap to close</span>
+        </div>
+      )}
     </div>
   );
 }
