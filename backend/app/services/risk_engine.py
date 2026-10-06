@@ -5,25 +5,27 @@ documented prototype reference ranges (not WHO/pregnancy-specific
 diagnostic thresholds) to produce an explainable LOW / MEDIUM / HIGH /
 CRITICAL assessment for the demo dashboard and mobile app.
 
-Inputs: heart rate, SpO2, temperature, blood pressure (mock/manual for
-now — the wearable measures HR + movement only), gestational week,
-logged symptoms.
+Inputs: heart rate, SpO2, blood pressure (manual/external monitor -
+the wearable cannot measure BP), gestational week, logged symptoms.
+Temperature is deliberately not used.
 
 Scoring (prototype weights):
     BP >= 140/90            -> +3
     SpO2 < 95%              -> +3
     HR > 100 bpm            -> +1
-    Temperature >= 38.0 C   -> +2
-    Concerning symptom      -> +2 each (headache, swelling, bleeding,
-                               vision changes, severe pain, high
-                               severity >= 4, or AI-flagged)
-    Headache + swelling     -> +3 extra (preeclampsia pattern)
+    Concerning symptom      -> +1 each (headache, swelling, bleeding,
+                               vision changes, severe pain, severity >= 4,
+                               or AI-flagged)
+    Headache + swelling     -> +2 extra (preeclampsia pattern)
     Late gestation (>= 36w)
       with any warning sign -> +1 (late-onset vigilance)
 
-Levels (names kept stable for dashboard/mobile clients):
-    0-2  -> low        3-5  -> medium
-    6-8  -> high       9+   -> critical
+Levels (names kept stable for dashboard/mobile clients). Bands are
+deliberately conservative so ordinary readings do not escalate to an
+alarm the readings do not justify - e.g. BP 126/88 with SpO2 94 scores 3
+=> MEDIUM ("SpO2 below preferred range"), not Critical:
+    0-2  -> low        3-4  -> medium
+    5-6  -> high       7+   -> critical
 """
 
 # Symptoms treated as concerning for maternal wellness monitoring.
@@ -77,9 +79,10 @@ def calculate_risk(vitals: dict, symptoms: list,
 
     hr = vitals.get("heart_rate")
     spo2 = vitals.get("spo2")
-    temp = vitals.get("temperature")
     sys_bp = vitals.get("systolic_bp")
     dia_bp = vitals.get("diastolic_bp")
+    # Temperature is intentionally ignored: this wearable cannot measure
+    # it, and a stale mock value must not inflate risk.
 
     bp_high = False
     if sys_bp is not None and sys_bp >= BP_SYS_HIGH:
@@ -93,15 +96,11 @@ def calculate_risk(vitals: dict, symptoms: list,
 
     if spo2 is not None and spo2 < SPO2_LOW:
         score += 3
-        factors.append(f"Low SpO2 ({spo2}%)")
+        factors.append(f"SpO2 below the preferred range ({spo2}%)")
 
     if hr is not None and hr > HR_HIGH:
         score += 1
         factors.append(f"Increased heart rate ({hr} bpm)")
-
-    if temp is not None and temp >= TEMP_HIGH:
-        score += 2
-        factors.append(f"Elevated temperature ({temp}C)")
 
     has_headache = False
     has_swelling = False
@@ -112,7 +111,7 @@ def calculate_risk(vitals: dict, symptoms: list,
         if "swelling" in stype:
             has_swelling = True
         if _is_concerning(s):
-            score += 2
+            score += 1
             sev = s.get("severity")
             label = s.get("symptom_type", "symptom")
             factors.append(
@@ -120,7 +119,7 @@ def calculate_risk(vitals: dict, symptoms: list,
                 + (f" (severity {sev}/5)" if sev else ""))
 
     if has_headache and has_swelling:
-        score += 3
+        score += 2
         factors.append(
             "Headache + swelling together - possible preeclampsia "
             "pattern, needs medical review")
@@ -140,9 +139,9 @@ def calculate_risk(vitals: dict, symptoms: list,
 
     if score <= 2:
         level = "low"
-    elif score <= 5:
+    elif score <= 4:
         level = "medium"
-    elif score <= 8:
+    elif score <= 6:
         level = "high"
     else:
         level = "critical"

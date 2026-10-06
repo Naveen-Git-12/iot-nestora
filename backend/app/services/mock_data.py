@@ -74,6 +74,11 @@ for patient in MOCK_PATIENTS:
             sys_bp = random.randint(125, 142)
             dia_bp = random.randint(82, 92)
 
+        # P001 is the demo patient: keep BP normal so the visible risk
+        # comes from logged symptoms, not a random mock reading.
+        if pid == "P001":
+            sys_bp, dia_bp = 118, 76
+
         vitals_list.append(
             {
                 "id": f"V{pid}_{i}",
@@ -92,6 +97,8 @@ for patient in MOCK_PATIENTS:
     MOCK_VITALS[pid] = vitals_list
 
 MOCK_SYMPTOMS = {
+    # P001 = demo patient (Gayathri). Mild headache only -> MEDIUM risk
+    # with one clear reason; the doctor can log more symptoms to escalate.
     "P001": [
         {
             "id": "S1",
@@ -100,15 +107,6 @@ MOCK_SYMPTOMS = {
             "severity": 3,
             "description": "Mild headache since morning",
             "timestamp": (datetime.now() - timedelta(hours=5)).isoformat(),
-            "ai_flagged": True,
-        },
-        {
-            "id": "S2",
-            "patient_id": "P001",
-            "symptom_type": "Swelling",
-            "severity": 2,
-            "description": "Slight swelling in ankles",
-            "timestamp": (datetime.now() - timedelta(days=1)).isoformat(),
             "ai_flagged": False,
         },
     ],
