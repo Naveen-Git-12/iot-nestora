@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
 import '../services/session_service.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -12,6 +13,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emergencyCtrl = TextEditingController();
+  final _serverCtrl = TextEditingController();
   int _week = 28;
   String _due = 'Sep 15, 2026';
   bool _loading = true;
@@ -28,6 +30,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _nameCtrl.text = (p['name'] as String).isEmpty ? 'Priya' : p['name'] as String;
     _phoneCtrl.text = p['phone'] as String;
     _emergencyCtrl.text = p['emergency'] as String;
+    _serverCtrl.text = await SessionService.loadServerIp();
     setState(() {
       _week = (p['week'] as int).clamp(1, 42);
       _due = p['due'] as String;
@@ -50,6 +53,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       due: _due,
       emergency: _emergencyCtrl.text.trim(),
     );
+    await SessionService.saveServerIp(_serverCtrl.text);
+    await ApiService.loadBase();
     setState(() => _saving = false);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -90,6 +95,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     _emergencyCtrl.dispose();
+    _serverCtrl.dispose();
     super.dispose();
   }
 
@@ -149,6 +155,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 12),
                   _field(_emergencyCtrl, 'Emergency Contact',
                       Icons.contact_phone_outlined, TextInputType.phone),
+                  const SizedBox(height: 12),
+                  _field(_serverCtrl, 'Server IP (e.g. 10.248.54.151)',
+                      Icons.dns_outlined, TextInputType.number),
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.all(16),

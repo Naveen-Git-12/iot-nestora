@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'session_service.dart';
 
 /// API layer with offline fallback.
 ///
@@ -8,7 +9,18 @@ import 'package:http/http.dart' as http;
 /// timeout and on any failure returns local fallback data so the app stays
 /// fully functional on a physical device without the backend running.
 class ApiService {
-  static const String baseUrl = 'http://10.0.2.2:8000';
+  static const String defaultBaseUrl = 'http://10.0.2.2:8000';
+  static String _customBase = '';
+
+  /// Call once at startup (and after profile save): picks up a LAN IP
+  /// entered on the Profile screen so physical phones can reach the PC.
+  static Future<void> loadBase() async {
+    final ip = await SessionService.loadServerIp();
+    _customBase = ip.isEmpty ? '' : 'http://$ip:8000';
+  }
+
+  static String get baseUrl =>
+      _customBase.isEmpty ? defaultBaseUrl : _customBase;
 
   static const Map<String, dynamic> fallbackVitals = {
     'heart_rate': 82,

@@ -131,6 +131,7 @@ class _DashboardTabState extends State<_DashboardTab> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
+    await ApiService.loadBase();
     final profile = await SessionService.loadProfile();
     final pid = (profile['patientId'] as String?) ?? 'P001';
     final results = await Future.wait([

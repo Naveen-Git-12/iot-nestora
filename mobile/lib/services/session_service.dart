@@ -9,6 +9,7 @@ class SessionService {
   static const _kDue = 'profile_due';
   static const _kEmergency = 'profile_emergency';
   static const _kPatientId = 'patient_id';
+  static const _kServerIp = 'server_ip';
 
   static Future<void> saveProfile({
     required String name,
@@ -38,8 +39,7 @@ class SessionService {
     };
   }
 
-  static Future<bool> isLoggedIn() async {
-    final p = await SharedPreferences.getInstance();
+  static Future<bool> isLoggedIn() async {    final p = await SharedPreferences.getInstance();
     final name = p.getString(_kName) ?? '';
     final phone = p.getString(_kPhone) ?? '';
     return name.isNotEmpty && phone.isNotEmpty;
@@ -48,5 +48,16 @@ class SessionService {
   static Future<void> clear() async {
     final p = await SharedPreferences.getInstance();
     await p.clear();
+  }
+
+  /// Backend LAN IP for physical devices (emulator uses 10.0.2.2).
+  static Future<String> loadServerIp() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kServerIp) ?? '';
+  }
+
+  static Future<void> saveServerIp(String ip) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kServerIp, ip.trim());
   }
 }
