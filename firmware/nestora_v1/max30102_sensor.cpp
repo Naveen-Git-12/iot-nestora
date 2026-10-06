@@ -23,17 +23,19 @@ bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
     online_ = false;
     return false;
   }
-  // PROVEN hardware-test values (do not "tune" blindly):
+  // Power-trimmed LED config: full brightness caused USB brownout
+  // resets on weak ports when the sensor pressed. IR signal at these
+  // levels still reads ~80k+ on skin (threshold is 10k).
   particleSensor.setup(
-      60,   // LED brightness
+      40,   // LED brightness (was 60)
       4,    // sampleAverage
       2,    // ledMode: red + IR
       100,  // sampleRate Hz
       411,  // pulseWidth us
       4096  // adcRange
   );
-  particleSensor.setPulseAmplitudeRed(0x24);
-  particleSensor.setPulseAmplitudeIR(0x24);  // IR emission required
+  particleSensor.setPulseAmplitudeRed(0x1F);
+  particleSensor.setPulseAmplitudeIR(0x1F);  // IR emission required
   particleSensor.setPulseAmplitudeGreen(0);
   online_ = true;
   resetBeatState();
