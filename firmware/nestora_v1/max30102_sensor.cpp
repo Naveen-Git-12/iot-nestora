@@ -41,7 +41,10 @@ Max30102Sensor::Max30102Sensor() {}
 // are 6 bytes each (3 red + 3 IR, 18-bit left-aligned).
 #define MAX_FIFO_BYTES 192  // 32 samples * 6 bytes
 #define REG_FIFO_DATA 0x04
-#define REG_FIFO_CFG 0x05
+#define REG_FIFO_CFG 0x05   // bits [4:0] = FIFO_WR_PTR
+// MAX30102 keeps OVF_COUNTER in INTERRUPT_STATUS_2 bits [1:0] - NOT in
+// register 0x05, whose bits [2:1] are write-pointer bits.
+#define REG_INT_STATUS2 0x01
 
 static uint8_t fifoReadReg(TwoWire *bus, uint8_t reg) {
   bus->beginTransmission(MAX_ADDRESS);
@@ -95,10 +98,9 @@ bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
   online_ = true;
   ourRd_ = 0;
   fifoOvf_ = 0;
-  // Clear any overflow counter left over from a previous session and
-  // resync our read pointer with the chip's write pointer.
-  uint8_t cfg0 = fifoReadReg(bus_, REG_FIFO_CFG);
-  fifoWriteReg(bus_, REG_FIFO_CFG, (uint8_t)(cfg0 & (uint8_t)~0x06));
+  // Clear any latched overflow counter and resync with the write pointer.
+  fifoWriteReg(bus_, REG_INT_STATUS2, (uint8_t)~0x03);
+  ourRd_ = (uint8_t)(fifoReadReg(bus_, REG_FIFO_CFG) & 0x1F);
   resetBeatState();
   return true;
 }
@@ -127,8 +129,8 @@ void Max30102Sensor::update() {
   unsigned long now = millis();
 
   uint8_t cfg = fifoReadReg(bus_, REG_FIFO_CFG);
-  uint8_t wr = (uint8_t)(cfg & 0x1F);       // FIFO_WR_PTR
-  uint8_t ovf = (uint8_t)((cfg >> 1) & 0x03);  // OVF_COUNTER
+  uint8_t wr = (uint8_t)(cfg & 0x1F);       // FIFO_WR_PTR (bits [4:0])
+  uint8_t ovf = (uint8_t)(fifoReadReg(bus_, REG_INT_STATUS2) & 0x03);
   uint8_t avail = (uint8_t)((wr - ourRd_) & 0x1F);
 
   // Overflow means the sensor dropped samples: the stream now has gaps,
@@ -138,7 +140,9 @@ void Max30102Sensor::update() {
   if (ovf > 0) {
     ourRd_ = wr;
     fifoOvf_++;
-    fifoWriteReg(bus_, REG_FIFO_CFG, (uint8_t)(cfg & (uint8_t)~0x06));
+    // Clear OVF_COUNTER (write 0 to bits [1:0]); it latches otherwise.
+    uint8_t st = fifoReadReg(bus_, REG_INT_STATUS2);
+    fifoWriteReg(bus_, REG_INT_STATUS2, (uint8_t)(st & (uint8_t)~0x03));
     resetBeatState();
     return;
   }
