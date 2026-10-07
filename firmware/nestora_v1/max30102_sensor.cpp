@@ -19,8 +19,14 @@
 // period bounds in samples: 6000/200=30 .. 6000/40=150
 #define LAG_MIN 30
 #define LAG_MAX 150
-// a believable periodicity must correlate at least this well
-#define AC_MIN_PEAK 0.30f
+// A believable periodicity must correlate this well. 0.30 was far too
+// loose: noisy/transition blocks scored just above it and produced
+// nonsense rates like 199 BPM.
+#define AC_MIN_PEAK 0.55f
+// Ceiling for the estimator. Pregnancy effort tops out around 160-170;
+// anything above this is optical artifact (dicrotic echo, contact
+// transient, motion), not a heart rate.
+#define AC_MAX_BPM 180
 
 static MAX30105 particleSensor;
 
@@ -151,7 +157,7 @@ static int estimateBpmAutocorr(const uint32_t *samples, int n) {
   if (lagEst <= 0) return -1;
 
   float bpm = (FS_HZ * 60.0f) / lagEst;
-  if (bpm < HR_MIN || bpm > HR_MAX) return -1;
+  if (bpm < HR_MIN || bpm > AC_MAX_BPM) return -1;
   return (int)(bpm + 0.5f);
 }
 
@@ -173,6 +179,15 @@ void Max30102Sensor::runMaximBlock() {
   contactLostAt_ = 0;
 
   int bpm = estimateBpmAutocorr(irBuf_, BLOCK_N);
+  // Outlier gate: reject a block that disagrees wildly with the recent
+  // median. A single 199 BPM block must never enter the history that
+  // drives the displayed value.
+  if (bpm > 0 && histCount_ >= 3) {
+    int med0 = median();
+    if (med0 > 0 && fabsf((float)bpm - (float)med0) / (float)med0 > 0.25f) {
+      bpm = -1;
+    }
+  }
   if (bpm > 0) {
     if (prevBpm_ > 0) {
       float diff = fabsf((float)bpm - (float)prevBpm_) / (float)prevBpm_;

@@ -307,8 +307,10 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _serverController = TextEditingController();
   bool _checking = true;
   bool _busy = false;
+  bool _showServer = false;
 
   @override
   void initState() {
@@ -317,6 +319,8 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _autoLogin() async {
+    await ApiService.loadBase();
+    _serverController.text = await SessionService.loadServerIp();
     final loggedIn = await SessionService.isLoggedIn();
     if (!mounted) return;
     if (loggedIn) {
@@ -330,6 +334,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
+    _serverController.dispose();
     super.dispose();
   }
 
@@ -343,6 +348,11 @@ class _LoginScreenState extends State<LoginScreen> {
     if (phone.replaceAll(RegExp(r'\D'), '').length < 10) {
       _showError('Please enter a valid 10-digit phone number');
       return;
+    }
+    final ip = _serverController.text.trim();
+    if (ip.isNotEmpty) {
+      await SessionService.saveServerIp(ip);
+      await ApiService.loadBase();
     }
     setState(() => _busy = true);
 
@@ -477,7 +487,38 @@ class _LoginScreenState extends State<LoginScreen> {
                             icon: Icons.phone_outlined,
                             keyboardType: TextInputType.phone,
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              onPressed: () =>
+                                  setState(() => _showServer = !_showServer),
+                              icon: Icon(
+                                _showServer
+                                    ? Icons.expand_less
+                                    : Icons.dns_outlined,
+                                size: 16,
+                                color: ThemeColors.subtitle,
+                              ),
+                              label: const Text(
+                                'Server settings',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: ThemeColors.subtitle,
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (_showServer) ...[
+                            const SizedBox(height: 4),
+                            CustomTextField(
+                              controller: _serverController,
+                              label: 'Server IP (no port)',
+                              icon: Icons.lan_outlined,
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          const SizedBox(height: 12),
                           GradientButton(
                               onPressed: _busy ? () {} : _login,
                               busy: _busy),
