@@ -110,8 +110,8 @@ void Max30102Sensor::resetBeatState() {
   filled_ = 0;
   blockIrSum_ = 0;
   blockIrCount_ = 0;
-  fifoCount_ = 0;
-  fifoWinAt_ = 0;
+  // fifoCount_/fifoWinAt_ intentionally NOT reset: rate telemetry must
+  // survive a filter reset, otherwise sr/ovf freeze at stale numbers.
   minBpm_ = -1;
   maxBpm_ = -1;
   beatConsistency_ = 0.0f;
