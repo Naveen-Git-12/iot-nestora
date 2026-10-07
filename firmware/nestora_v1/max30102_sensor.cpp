@@ -61,13 +61,20 @@ static void fifoWriteReg(TwoWire *bus, uint8_t reg, uint8_t val) {
   bus->endTransmission();
 }
 
-static void fifoReadBurst(TwoWire *bus, uint8_t reg, uint8_t *dst,
-                          uint8_t len) {
+// ESP32 Arduino Wire caps a single transaction at 32 bytes, so read the
+// FIFO in chunks. Requesting avail*6 bytes in one go silently returned a
+// short read, which desynced our pointer from the chip and stalled the
+// stream (frozen IR, no new blocks).
+#define WIRE_CHUNK 30  // 5 samples, safely under the 32-byte limit
+
+static uint8_t fifoReadChunk(TwoWire *bus, uint8_t reg, uint8_t *dst,
+                             uint8_t len) {
   bus->beginTransmission(MAX_ADDRESS);
   bus->write(reg);
   bus->endTransmission();
   uint8_t got = (uint8_t)bus->requestFrom(MAX_ADDRESS, len);
   for (uint8_t i = 0; i < got; i++) dst[i] = (uint8_t)bus->read();
+  return got;
 }
 
 bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
@@ -149,43 +156,49 @@ void Max30102Sensor::update() {
   if (avail == 0) return;
   if (avail > 32) avail = 32;
 
-  uint8_t raw[MAX_FIFO_BYTES];
-  fifoReadBurst(bus_, REG_FIFO_DATA, raw, (uint8_t)(avail * 6));
+  // Consume every sample currently queued, in wire-sized chunks.
+  uint8_t raw[WIRE_CHUNK];
+  while (avail > 0) {
+    uint8_t chunkSamples = (avail > (WIRE_CHUNK / 6)) ? (WIRE_CHUNK / 6)
+                                                      : avail;
+    uint8_t want = (uint8_t)(chunkSamples * 6);
+    uint8_t got = fifoReadChunk(bus_, REG_FIFO_DATA, raw, want);
+    uint8_t gotSamples = (uint8_t)(got / 6);
+    if (gotSamples == 0) break;  // bus hiccup: retry next pass
 
-  uint8_t got = (uint8_t)(avail * 6);
-  for (uint8_t s = 0; s + 6 <= got; s += 6) {
-    // 3 bytes per LED, MSB first; 18-bit value left-aligned in 24 bits.
-    uint32_t red = ((uint32_t)raw[s] << 16) | ((uint32_t)raw[s + 1] << 8) |
-                   raw[s + 2];
-    uint32_t ir = ((uint32_t)raw[s + 3] << 16) |
-                  ((uint32_t)raw[s + 4] << 8) | raw[s + 5];
-    red >>= 6;
-    ir >>= 6;
+    for (uint8_t s = 0; s < gotSamples; s++) {
+      uint8_t *p = &raw[s * 6];
+      // 3 bytes per LED, MSB first; 18-bit value is left-aligned in 24.
+      uint32_t red = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2];
+      uint32_t ir = ((uint32_t)p[3] << 16) | ((uint32_t)p[4] << 8) | p[5];
+      red >>= 6;
+      ir >>= 6;
 
-    lastRed_ = red;
-    lastIr_ = ir;
-    irBuf_[bufIdx_] = ir;
-    redBuf_[bufIdx_] = red;
-    bufIdx_++;
-    if (filled_ < BLOCK_N) filled_++;
-    blockIrSum_ += ir;
-    blockIrCount_++;
+      lastRed_ = red;
+      lastIr_ = ir;
+      irBuf_[bufIdx_] = ir;
+      redBuf_[bufIdx_] = red;
+      bufIdx_++;
+      if (filled_ < BLOCK_N) filled_++;
+      blockIrSum_ += ir;
+      blockIrCount_++;
 
-    // Rate telemetry (real samples per second).
-    if (fifoWinAt_ == 0) fifoWinAt_ = now;
-    fifoCount_++;
-    if (now - fifoWinAt_ >= 1000) {
-      sampleRate_ = fifoCount_;
-      fifoCount_ = 0;
-      fifoWinAt_ = now;
+      if (fifoWinAt_ == 0) fifoWinAt_ = now;
+      fifoCount_++;
+      if (now - fifoWinAt_ >= 1000) {
+        sampleRate_ = fifoCount_;
+        fifoCount_ = 0;
+        fifoWinAt_ = now;
+      }
+
+      if (bufIdx_ >= BLOCK_N && filled_ >= BLOCK_N) {
+        bufIdx_ = 0;
+        runMaximBlock();
+      }
     }
-
-    if (bufIdx_ >= BLOCK_N && filled_ >= BLOCK_N) {
-      bufIdx_ = 0;
-      runMaximBlock();
-    }
+    avail = (uint8_t)(avail - gotSamples);
+    ourRd_ = (uint8_t)((ourRd_ + gotSamples) & 0x1F);
   }
-  ourRd_ = (uint8_t)((wr) & 0x1F);
 }
 
 // Autocorrelation HR. Returns BPM, or -1 when no periodicity stands out.
