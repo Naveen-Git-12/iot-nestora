@@ -1,5 +1,20 @@
 # NESTORA V1 Firmware (ESP32-S3 Super Mini)
 
+> # ⚠️ DO NOT MODIFY THIS CODE
+>
+> **This firmware is finished, tested, and working. Do not edit, optimise,
+> refactor or rewrite any file here unless the project owner explicitly asks
+> you to.**
+>
+> The heart-rate pipeline measures a stable **61–66 BPM** with SpO₂ 93–100%.
+> Several reasonable-sounding changes made it worse — lowering the sample rate
+> caused double-counting (reporting 154 BPM for a ~77 BPM heart), and
+> loosening the correlation gates let phantom readings through. There is no
+> way to verify a change without flashing real hardware.
+>
+> Safe to do: `build.sh` (compile), `upload.sh` (flash), and reading the code
+> to understand or explain it. Everything else — leave it alone.
+
 Wearable: MAX30102 (HR/PPG) + MPU6050 (accel/gyro).
 Flow: `WEARABLE -> BLE -> Flutter gateway -> FastAPI -> Dashboard`.
 

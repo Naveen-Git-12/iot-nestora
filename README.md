@@ -104,6 +104,10 @@ resting 70–110, light activity 90–130.
 
 ---
 
+> ⚠️ **Warning:** the `firmware/` folder (ESP32 wearable code) is finished and
+> verified. **Do not modify it** unless the project owner asks — see
+> [the full warning](docs/WINDOWS_SETUP.md#️-warning--do-not-touch-the-firmware-code).
+
 ## Setup guides
 
 - **[Windows setup (complete, step by step)](docs/WINDOWS_SETUP.md)** — recommended

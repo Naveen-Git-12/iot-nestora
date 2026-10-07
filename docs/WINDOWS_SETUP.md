@@ -6,6 +6,37 @@ Prompt, the commands are the same unless noted.
 
 ---
 
+> # ⚠️ WARNING — DO NOT TOUCH THE FIRMWARE CODE
+>
+> **The entire `firmware/` folder is finished, tested, and working.
+> Do NOT edit, "improve", optimise, refactor, or rewrite any file inside it
+> unless the project owner explicitly asks you to.**
+>
+> Specifically leave alone:
+> - `firmware/nestora_v1/max30102_sensor.cpp` — heart-rate and SpO₂ sensing
+> - `firmware/nestora_v1/activity_engine.cpp` — steps and activity
+> - `firmware/nestora_v1/health_engine.cpp` — pregnancy HR ranges
+> - `firmware/nestora_v1/ble_service.cpp` — Bluetooth broadcasting
+> - `firmware/nestora_v1/nestora_v1.ino` — main loop
+> - `firmware/config.h`, `firmware/nestora_v1/models.h`
+>
+> **Why this warning exists:** the heart-rate pipeline took many attempts to
+> get right. It now measures a stable **61–66 BPM** with SpO₂ 93–100%. Several
+> plausible-looking "improvements" made the result *worse* — dropping the
+> sample rate caused double-counting (154 BPM reported for a ~77 BPM heart),
+> and loosening the signal gates let phantom readings through. Changing the
+> code without hardware to test on will break a working sensor.
+>
+> **You MAY safely do these firmware things:**
+> - `build.sh` / `upload.sh` (compile and flash)
+> - Reading the code to understand or explain it
+> - The wiring table in section 7
+>
+> Everything else in this project — backend, mobile app, dashboard — is
+> open to change. Only the firmware is off-limits.
+
+---
+
 ## 0. What this project is (read this first)
 
 NESTORA is a **Smart Maternal Wellness Monitoring System** — a college
@@ -434,6 +465,16 @@ and paste this:
 ```
 Read README.md and docs/WINDOWS_SETUP.md first.
 
+⚠️ HARD RULE — DO NOT MODIFY THE firmware/ FOLDER.
+It is finished and verified (heart rate measures a stable 61-66 BPM,
+SpO2 93-100%). Previous "improvements" to it made the readings worse,
+including one that reported 154 BPM for a ~77 BPM heart. Do not edit,
+optimise, refactor or rewrite anything under firmware/ unless I
+explicitly ask you to. You may still read it to explain it, and you
+may run firmware/build.sh to compile-check it.
+
+Everything else (backend/, mobile/, doctor-dashboard/) is open to change.
+
 I have the NESTORA project running: backend on port 8000, doctor dashboard
 on port 5173, Flutter app installed on a connected Android phone.
 
@@ -442,7 +483,8 @@ Current state:
 - Mobile: Flutter, enrolment-gated login, BLE gateway for the Nestora-V1
   wearable, manual BP entry, week-based nutrition, risk details
 - Dashboard: React, shows only live-device patients, can enrol patients
-- Firmware: ESP32-S3, MAX30102 (HR/SpO2) + MPU6050 (steps/activity)
+- Firmware: ESP32-S3, MAX30102 (HR/SpO2) + MPU6050 (steps/activity) —
+  LOCKED, do not modify
 
 The demo login is Gayathri / 9489675377. The app's Server IP setting must
 match this machine's LAN IP for the phone to reach the backend.
