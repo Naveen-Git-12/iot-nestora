@@ -104,6 +104,14 @@ resting 70–110, light activity 90–130.
 
 ---
 
+## Setup guides
+
+- **[Windows setup (complete, step by step)](docs/WINDOWS_SETUP.md)** — recommended
+  for new machines and for anyone cloning the repo for the first time.
+- [Manual setup](#prerequisites) — platform-agnostic instructions below.
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Why |
