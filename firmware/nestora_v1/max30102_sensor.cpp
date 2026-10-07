@@ -135,69 +135,33 @@ void Max30102Sensor::update() {
   if (!online_) return;
   unsigned long now = millis();
 
-  uint8_t cfg = fifoReadReg(bus_, REG_FIFO_CFG);
-  uint8_t wr = (uint8_t)(cfg & 0x1F);       // FIFO_WR_PTR (bits [4:0])
-  uint8_t ovf = (uint8_t)(fifoReadReg(bus_, REG_INT_STATUS2) & 0x03);
-  uint8_t avail = (uint8_t)((wr - ourRd_) & 0x1F);
-
-  // Overflow means the sensor dropped samples: the stream now has gaps,
-  // which corrupts peak timing. Flush, clear the latched counter (it
-  // stays set until written to 0 - forgetting this wedges the driver),
-  // and restart the block buffers.
-  if (ovf > 0) {
-    ourRd_ = wr;
-    fifoOvf_++;
-    // Clear OVF_COUNTER (write 0 to bits [1:0]); it latches otherwise.
-    uint8_t st = fifoReadReg(bus_, REG_INT_STATUS2);
-    fifoWriteReg(bus_, REG_INT_STATUS2, (uint8_t)(st & (uint8_t)~0x03));
-    resetBeatState();
-    return;
+  if (!particleSensor.available()) {
+    particleSensor.check();          // burst-reads the FIFO, no blocking
+    if (!particleSensor.available()) return;
   }
-  if (avail == 0) return;
-  if (avail > 32) avail = 32;
 
-  // Consume every sample currently queued, in wire-sized chunks.
-  uint8_t raw[WIRE_CHUNK];
-  while (avail > 0) {
-    uint8_t chunkSamples = (avail > (WIRE_CHUNK / 6)) ? (WIRE_CHUNK / 6)
-                                                      : avail;
-    uint8_t want = (uint8_t)(chunkSamples * 6);
-    uint8_t got = fifoReadChunk(bus_, REG_FIFO_DATA, raw, want);
-    uint8_t gotSamples = (uint8_t)(got / 6);
-    if (gotSamples == 0) break;  // bus hiccup: retry next pass
+  lastRed_ = particleSensor.getRed();
+  lastIr_ = particleSensor.getIR();
+  particleSensor.nextSample();
 
-    for (uint8_t s = 0; s < gotSamples; s++) {
-      uint8_t *p = &raw[s * 6];
-      // 3 bytes per LED, MSB first; 18-bit value is left-aligned in 24.
-      uint32_t red = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2];
-      uint32_t ir = ((uint32_t)p[3] << 16) | ((uint32_t)p[4] << 8) | p[5];
-      red >>= 6;
-      ir >>= 6;
+  irBuf_[bufIdx_] = lastIr_;
+  redBuf_[bufIdx_] = lastRed_;
+  bufIdx_++;
+  if (filled_ < BLOCK_N) filled_++;
+  blockIrSum_ += lastIr_;
+  blockIrCount_++;
 
-      lastRed_ = red;
-      lastIr_ = ir;
-      irBuf_[bufIdx_] = ir;
-      redBuf_[bufIdx_] = red;
-      bufIdx_++;
-      if (filled_ < BLOCK_N) filled_++;
-      blockIrSum_ += ir;
-      blockIrCount_++;
+  if (fifoWinAt_ == 0) fifoWinAt_ = now;
+  fifoCount_++;
+  if (now - fifoWinAt_ >= 1000) {
+    sampleRate_ = fifoCount_;
+    fifoCount_ = 0;
+    fifoWinAt_ = now;
+  }
 
-      if (fifoWinAt_ == 0) fifoWinAt_ = now;
-      fifoCount_++;
-      if (now - fifoWinAt_ >= 1000) {
-        sampleRate_ = fifoCount_;
-        fifoCount_ = 0;
-        fifoWinAt_ = now;
-      }
-
-      if (bufIdx_ >= BLOCK_N && filled_ >= BLOCK_N) {
-        bufIdx_ = 0;
-        runMaximBlock();
-      }
-    }
-    avail = (uint8_t)(avail - gotSamples);
-    ourRd_ = (uint8_t)((ourRd_ + gotSamples) & 0x1F);
+  if (bufIdx_ >= BLOCK_N && filled_ >= BLOCK_N) {
+    bufIdx_ = 0;
+    runMaximBlock();
   }
 }
 
