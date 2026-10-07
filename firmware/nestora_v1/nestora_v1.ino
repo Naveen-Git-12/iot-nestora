@@ -119,11 +119,7 @@ void loop() {
   // A fixed small drain lets the 32-deep hardware FIFO overflow
   // between loops; overflowed gaps make peak intervals meaningless
   // and block HR swings wildly (107/136/214/187 on one touch).
-  for (int i = 0; i < 32; i++) {
-    int before = maxSensor.buffered();
-    maxSensor.update();
-    if (maxSensor.buffered() == before) break;  // FIFO empty, stop early
-  }
+  maxSensor.update();  // drains everything available internally
   loopCount_++;
 
   // Retry offline sensors every 30 s (lets user reseat wires live).
@@ -211,11 +207,12 @@ void loop() {
         maxSensor.currentBpm(), activity.activity(),
         maxSensor.hasContact(), ctx, sizeof(ctx));
     Serial.printf(
-        "IR=%lu RED=%lu BPM=%d AVG=%d lps=%d | mag=%.2f steps=%lu act=%s rest=%lus "
+        "IR=%lu RED=%lu BPM=%d AVG=%d sr=%d ovf=%d | mag=%.2f steps=%lu act=%s rest=%lus "
         "qual=%d fall=%d ble_adv=%d started=%d clients=%d heap=%lu rst=%s | %s\n",
         (unsigned long)maxSensor.ir(), (unsigned long)maxSensor.red(),
         maxSensor.currentBpm(),
-        maxSensor.averageBpm(), loopRate_, mpuSensor.magnitude(), activity.steps(),
+        maxSensor.averageBpm(), maxSensor.sampleRate(),
+        maxSensor.overflows(), mpuSensor.magnitude(), activity.steps(),
         activity.activity(), (unsigned long)activity.restSeconds(),
         maxSensor.signalQuality(),
         activity.fallCandidate() ? 1 : 0,

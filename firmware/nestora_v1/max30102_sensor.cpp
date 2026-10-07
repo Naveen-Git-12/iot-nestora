@@ -58,6 +58,8 @@ bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
   particleSensor.setPulseAmplitudeIR(0x24);
   particleSensor.setPulseAmplitudeGreen(0);
   online_ = true;
+  ourRd_ = 0;
+  fifoOvf_ = 0;
   resetBeatState();
   return true;
 }
@@ -72,6 +74,8 @@ void Max30102Sensor::resetBeatState() {
   filled_ = 0;
   blockIrSum_ = 0;
   blockIrCount_ = 0;
+  fifoCount_ = 0;
+  fifoWinAt_ = 0;
   minBpm_ = -1;
   maxBpm_ = -1;
   beatConsistency_ = 0.0f;
@@ -79,31 +83,91 @@ void Max30102Sensor::resetBeatState() {
   for (int i = 0; i < HIST_N; i++) histBuf_[i] = 0;
 }
 
+// ── Direct FIFO read ───────────────────────────────────────────────────────
+// The SparkFun helper getRed()/getIR() call safeCheck(), which BLOCKS in a
+// delay(1) loop and returns 0 when nothing arrives in time. That capped
+// throughput at ~10 samples/s AND injected zero samples into every block
+// (garbage -> erratic/phantom heart rates). We read the FIFO ourselves:
+// register 0x05 exposes the write pointer and overflow counter, samples
+// are 6 bytes each (3 red + 3 IR, 18-bit left-aligned).
+#define MAX_FIFO_BYTES 192  // 32 samples * 6 bytes
+#define REG_FIFO_DATA 0x04
+#define REG_FIFO_CFG 0x05
+
+static uint8_t fifoReadReg(TwoWire *bus, uint8_t reg) {
+  bus->beginTransmission(MAX_ADDRESS);
+  bus->write(reg);
+  bus->endTransmission();
+  if (bus->requestFrom(MAX_ADDRESS, (uint8_t)1) != 1) return 0;
+  return (uint8_t)bus->read();
+}
+
+static void fifoReadBurst(TwoWire *bus, uint8_t reg, uint8_t *dst,
+                          uint8_t len) {
+  bus->beginTransmission(MAX_ADDRESS);
+  bus->write(reg);
+  bus->endTransmission();
+  uint8_t got = (uint8_t)bus->requestFrom(MAX_ADDRESS, len);
+  for (uint8_t i = 0; i < got; i++) dst[i] = (uint8_t)bus->read();
+}
+
 void Max30102Sensor::update() {
   if (!online_) return;
-  // Refresh the cached FIFO pointers first, then drain everything that
-  // is available. The earlier one-sample-per-call path only checked the
-  // pointers when the cache looked empty, so the 32-deep FIFO overflowed
-  // and blocks took ~10 s to accumulate instead of 1 s.
-  particleSensor.check();
-  uint8_t guard = 0;
-  while (particleSensor.available() && guard < 32) {
-    guard++;
-    lastRed_ = particleSensor.getRed();
-    lastIr_ = particleSensor.getIR();
-    particleSensor.nextSample();
+  unsigned long now = millis();
 
-    irBuf_[bufIdx_] = lastIr_;
-    redBuf_[bufIdx_] = lastRed_;
+  uint8_t cfg = fifoReadReg(bus_, REG_FIFO_CFG);
+  uint8_t wr = (uint8_t)(cfg & 0x1F);       // FIFO_WR_PTR
+  uint8_t ovf = (uint8_t)((cfg >> 1) & 0x03);  // OVF_COUNTER
+  uint8_t avail = (uint8_t)((wr - ourRd_) & 0x1F);
+
+  // Overflow means the sensor dropped samples: the buffered stream has a
+  // gap, which corrupts peak timing. Flush and start clean.
+  if (ovf > 0) {
+    ourRd_ = wr;
+    fifoOvf_++;
+    resetBeatState();
+    return;
+  }
+  if (avail == 0) return;
+  if (avail > 32) avail = 32;
+
+  uint8_t raw[MAX_FIFO_BYTES];
+  fifoReadBurst(bus_, REG_FIFO_DATA, raw, (uint8_t)(avail * 6));
+
+  uint8_t got = (uint8_t)(avail * 6);
+  for (uint8_t s = 0; s + 6 <= got; s += 6) {
+    // 3 bytes per LED, MSB first; 18-bit value left-aligned in 24 bits.
+    uint32_t red = ((uint32_t)raw[s] << 16) | ((uint32_t)raw[s + 1] << 8) |
+                   raw[s + 2];
+    uint32_t ir = ((uint32_t)raw[s + 3] << 16) |
+                  ((uint32_t)raw[s + 4] << 8) | raw[s + 5];
+    red >>= 6;
+    ir >>= 6;
+
+    lastRed_ = red;
+    lastIr_ = ir;
+    irBuf_[bufIdx_] = ir;
+    redBuf_[bufIdx_] = red;
     bufIdx_++;
     if (filled_ < BLOCK_N) filled_++;
-    blockIrSum_ += lastIr_;
+    blockIrSum_ += ir;
     blockIrCount_++;
+
+    // Rate telemetry (real samples per second).
+    if (fifoWinAt_ == 0) fifoWinAt_ = now;
+    fifoCount_++;
+    if (now - fifoWinAt_ >= 1000) {
+      sampleRate_ = fifoCount_;
+      fifoCount_ = 0;
+      fifoWinAt_ = now;
+    }
+
+    if (bufIdx_ >= BLOCK_N && filled_ >= BLOCK_N) {
+      bufIdx_ = 0;
+      runMaximBlock();
+    }
   }
-  if (bufIdx_ >= BLOCK_N && filled_ >= BLOCK_N) {
-    bufIdx_ = 0;
-    runMaximBlock();
-  }
+  ourRd_ = (uint8_t)((wr) & 0x1F);
 }
 
 // Autocorrelation HR. Returns BPM, or -1 when no periodicity stands out.
@@ -248,11 +312,6 @@ int Max30102Sensor::median() const {
     tmp[j + 1] = key;
   }
   return tmp[histCount_ / 2];
-}
-
-int Max30102Sensor::buffered() {
-  if (!online_) return 0;
-  return particleSensor.available();
 }
 
 int Max30102Sensor::currentBpm() const {

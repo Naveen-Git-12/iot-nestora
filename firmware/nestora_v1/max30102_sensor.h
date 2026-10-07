@@ -40,8 +40,10 @@ class Max30102Sensor {
   // Prototype 0-100 heuristic (contact + IR strength + steadiness).
   int signalQuality();
 
-  // Samples currently waiting in the sensor FIFO (0-32).
-  int buffered();
+  // Telemetry: real optical samples per second (expect ~100) and the
+  // hardware FIFO overflow count (must stay 0 for trustworthy timing).
+  int sampleRate() const { return sampleRate_; }
+  int overflows() const { return fifoOvf_; }
 
   unsigned long contactThreshold = 10000UL;  // block-average IR
 
@@ -81,4 +83,9 @@ class Max30102Sensor {
   int maxBpm_ = -1;
   float beatConsistency_ = 0.0f;
   int prevBpm_ = -1;
+  uint8_t ourRd_ = 0;      // our FIFO read pointer
+  int fifoOvf_ = 0;        // hardware overflow counter
+  int sampleRate_ = 0;     // samples per second (measured)
+  int fifoCount_ = 0;
+  unsigned long fifoWinAt_ = 0;
 };
