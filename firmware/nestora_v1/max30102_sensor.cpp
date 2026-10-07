@@ -33,48 +33,33 @@ static MAX30105 particleSensor;
 Max30102Sensor::Max30102Sensor() {}
 
 // ── Direct FIFO read ───────────────────────────────────────────────────────
-// The SparkFun helper getRed()/getIR() call safeCheck(), which BLOCKS in a
-// delay(1) loop and returns 0 when nothing arrives in time. That capped
-// throughput at ~10 samples/s AND injected zero samples into every block
-// (garbage -> erratic/phantom heart rates). We read the FIFO ourselves:
-// register 0x05 exposes the write pointer and overflow counter, samples
-// are 6 bytes each (3 red + 3 IR, 18-bit left-aligned).
-#define MAX_FIFO_BYTES 192  // 32 samples * 6 bytes
-#define REG_FIFO_DATA 0x04
-#define REG_FIFO_CFG 0x05   // bits [4:0] = FIFO_WR_PTR
-// MAX30102 keeps OVF_COUNTER in INTERRUPT_STATUS_2 bits [1:0] - NOT in
-// register 0x05, whose bits [2:1] are write-pointer bits.
-#define REG_INT_STATUS2 0x01
+// The SparkFun accessor getRed() calls safeCheck(), which BLOCKS in a
+// delay(1) loop (and can return a bogus 0), capping the stream at ~10
+// samples/s. We read the FIFO ourselves instead.
+//
+// Register map verified against the MAX30102 datasheet (and the vendor
+// driver): FIFO_DATA is 0x07 - NOT 0x04. Reading 0x04 returns the write
+// pointer, which silently produced garbage samples and a stalled stream.
+#define REG_FIFO_WR_PTR 0x04
+#define REG_FIFO_OVF    0x05   // overflow counter in bits [1:0]
+#define REG_FIFO_RD_PTR 0x06
+#define REG_FIFO_DATA   0x07
+#define BYTES_PER_SAMPLE 6      // 2 LEDs x 3 bytes
+#define WIRE_CHUNK 30           // 5 samples; 32 % 6 != 0, so stay under
 
-static uint8_t fifoReadReg(TwoWire *bus, uint8_t reg) {
+static uint8_t maxRegRead(TwoWire *bus, uint8_t reg) {
   bus->beginTransmission(MAX_ADDRESS);
   bus->write(reg);
-  bus->endTransmission();
+  if (bus->endTransmission() != 0) return 0;
   if (bus->requestFrom(MAX_ADDRESS, (uint8_t)1) != 1) return 0;
   return (uint8_t)bus->read();
 }
 
-static void fifoWriteReg(TwoWire *bus, uint8_t reg, uint8_t val) {
+static void maxRegWrite(TwoWire *bus, uint8_t reg, uint8_t val) {
   bus->beginTransmission(MAX_ADDRESS);
   bus->write(reg);
   bus->write(val);
   bus->endTransmission();
-}
-
-// ESP32 Arduino Wire caps a single transaction at 32 bytes, so read the
-// FIFO in chunks. Requesting avail*6 bytes in one go silently returned a
-// short read, which desynced our pointer from the chip and stalled the
-// stream (frozen IR, no new blocks).
-#define WIRE_CHUNK 30  // 5 samples, safely under the 32-byte limit
-
-static uint8_t fifoReadChunk(TwoWire *bus, uint8_t reg, uint8_t *dst,
-                             uint8_t len) {
-  bus->beginTransmission(MAX_ADDRESS);
-  bus->write(reg);
-  bus->endTransmission();
-  uint8_t got = (uint8_t)bus->requestFrom(MAX_ADDRESS, len);
-  for (uint8_t i = 0; i < got; i++) dst[i] = (uint8_t)bus->read();
-  return got;
 }
 
 bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
@@ -106,8 +91,8 @@ bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
   ourRd_ = 0;
   fifoOvf_ = 0;
   // Clear any latched overflow counter and resync with the write pointer.
-  fifoWriteReg(bus_, REG_INT_STATUS2, (uint8_t)~0x03);
-  ourRd_ = (uint8_t)(fifoReadReg(bus_, REG_FIFO_CFG) & 0x1F);
+  maxRegWrite(bus_, REG_FIFO_OVF, (uint8_t)~0x03);
+  ourRd_ = (uint8_t)(maxRegRead(bus_, REG_FIFO_WR_PTR) & 0x1F);
   resetBeatState();
   return true;
 }
@@ -135,33 +120,73 @@ void Max30102Sensor::update() {
   if (!online_) return;
   unsigned long now = millis();
 
-  if (!particleSensor.available()) {
-    particleSensor.check();          // burst-reads the FIFO, no blocking
-    if (!particleSensor.available()) return;
+  uint8_t wr = (uint8_t)(maxRegRead(bus_, REG_FIFO_WR_PTR) & 0x1F);
+  uint8_t ovf = (uint8_t)(maxRegRead(bus_, REG_FIFO_OVF) & 0x03);
+  uint8_t avail = (uint8_t)((wr - ourRd_) & 0x1F);
+
+  if (ovf > 0) {
+    // Samples were dropped, so the buffered timeline has a gap and peak
+    // timing would be meaningless. Flush and restart the blocks.
+    ourRd_ = wr;
+    fifoOvf_++;
+    maxRegWrite(bus_, REG_FIFO_OVF, (uint8_t)~0x03);
+    resetBeatState();
+    return;
   }
+  if (avail == 0) return;
 
-  lastRed_ = particleSensor.getRed();
-  lastIr_ = particleSensor.getIR();
-  particleSensor.nextSample();
+  uint8_t chunk[WIRE_CHUNK];
+  while (avail > 0) {
+    uint8_t wantSamples =
+        (avail > (WIRE_CHUNK / BYTES_PER_SAMPLE))
+            ? (uint8_t)(WIRE_CHUNK / BYTES_PER_SAMPLE)
+            : avail;
+    uint8_t want = (uint8_t)(wantSamples * BYTES_PER_SAMPLE);
 
-  irBuf_[bufIdx_] = lastIr_;
-  redBuf_[bufIdx_] = lastRed_;
-  bufIdx_++;
-  if (filled_ < BLOCK_N) filled_++;
-  blockIrSum_ += lastIr_;
-  blockIrCount_++;
+    bus_->beginTransmission(MAX_ADDRESS);
+    bus_->write(REG_FIFO_DATA);
+    bus_->endTransmission();
+    uint8_t got = (uint8_t)bus_->requestFrom(MAX_ADDRESS, want);
 
-  if (fifoWinAt_ == 0) fifoWinAt_ = now;
-  fifoCount_++;
-  if (now - fifoWinAt_ >= 1000) {
-    sampleRate_ = fifoCount_;
-    fifoCount_ = 0;
-    fifoWinAt_ = now;
-  }
+    uint8_t gotSamples = (uint8_t)(got / BYTES_PER_SAMPLE);
+    if (gotSamples == 0) return;  // bus hiccup: retry on the next pass
+    for (uint8_t b = 0; b < got; b++) chunk[b] = (uint8_t)bus_->read();
 
-  if (bufIdx_ >= BLOCK_N && filled_ >= BLOCK_N) {
-    bufIdx_ = 0;
-    runMaximBlock();
+    for (uint8_t k = 0; k < gotSamples; k++) {
+      const uint8_t *p = &chunk[k * BYTES_PER_SAMPLE];
+      // 3 bytes per LED, MSB first; mask to the 18-bit sample.
+      uint32_t red = (((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) |
+                      (uint32_t)p[2]) & 0x3FFFFUL;
+      uint32_t ir = (((uint32_t)p[3] << 16) | ((uint32_t)p[4] << 8) |
+                     (uint32_t)p[5]) & 0x3FFFFUL;
+
+      lastRed_ = red;
+      lastIr_ = ir;
+      irBuf_[bufIdx_] = ir;
+      redBuf_[bufIdx_] = red;
+      bufIdx_++;
+      if (filled_ < BLOCK_N) filled_++;
+      blockIrSum_ += ir;
+      blockIrCount_++;
+
+      if (fifoWinAt_ == 0) fifoWinAt_ = now;
+      fifoCount_++;
+      if (now - fifoWinAt_ >= 1000) {
+        sampleRate_ = fifoCount_;
+        fifoCount_ = 0;
+        fifoWinAt_ = now;
+      }
+
+      if (bufIdx_ >= BLOCK_N && filled_ >= BLOCK_N) {
+        bufIdx_ = 0;
+        runMaximBlock();
+      }
+    }
+
+    // We consumed `gotSamples` samples; the chip's read pointer advanced
+    // with them, so track ours in lockstep.
+    ourRd_ = (uint8_t)((ourRd_ + gotSamples) & 0x1F);
+    avail = (uint8_t)(avail - gotSamples);
   }
 }
 
