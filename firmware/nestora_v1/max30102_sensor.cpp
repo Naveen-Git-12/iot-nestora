@@ -32,6 +32,41 @@ static MAX30105 particleSensor;
 
 Max30102Sensor::Max30102Sensor() {}
 
+// ── Direct FIFO read ───────────────────────────────────────────────────────
+// The SparkFun helper getRed()/getIR() call safeCheck(), which BLOCKS in a
+// delay(1) loop and returns 0 when nothing arrives in time. That capped
+// throughput at ~10 samples/s AND injected zero samples into every block
+// (garbage -> erratic/phantom heart rates). We read the FIFO ourselves:
+// register 0x05 exposes the write pointer and overflow counter, samples
+// are 6 bytes each (3 red + 3 IR, 18-bit left-aligned).
+#define MAX_FIFO_BYTES 192  // 32 samples * 6 bytes
+#define REG_FIFO_DATA 0x04
+#define REG_FIFO_CFG 0x05
+
+static uint8_t fifoReadReg(TwoWire *bus, uint8_t reg) {
+  bus->beginTransmission(MAX_ADDRESS);
+  bus->write(reg);
+  bus->endTransmission();
+  if (bus->requestFrom(MAX_ADDRESS, (uint8_t)1) != 1) return 0;
+  return (uint8_t)bus->read();
+}
+
+static void fifoWriteReg(TwoWire *bus, uint8_t reg, uint8_t val) {
+  bus->beginTransmission(MAX_ADDRESS);
+  bus->write(reg);
+  bus->write(val);
+  bus->endTransmission();
+}
+
+static void fifoReadBurst(TwoWire *bus, uint8_t reg, uint8_t *dst,
+                          uint8_t len) {
+  bus->beginTransmission(MAX_ADDRESS);
+  bus->write(reg);
+  bus->endTransmission();
+  uint8_t got = (uint8_t)bus->requestFrom(MAX_ADDRESS, len);
+  for (uint8_t i = 0; i < got; i++) dst[i] = (uint8_t)bus->read();
+}
+
 bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
   bus_ = bus;
   bus_->beginTransmission(address);
@@ -60,6 +95,10 @@ bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
   online_ = true;
   ourRd_ = 0;
   fifoOvf_ = 0;
+  // Clear any overflow counter left over from a previous session and
+  // resync our read pointer with the chip's write pointer.
+  uint8_t cfg0 = fifoReadReg(bus_, REG_FIFO_CFG);
+  fifoWriteReg(bus_, REG_FIFO_CFG, (uint8_t)(cfg0 & (uint8_t)~0x06));
   resetBeatState();
   return true;
 }
@@ -83,34 +122,6 @@ void Max30102Sensor::resetBeatState() {
   for (int i = 0; i < HIST_N; i++) histBuf_[i] = 0;
 }
 
-// ── Direct FIFO read ───────────────────────────────────────────────────────
-// The SparkFun helper getRed()/getIR() call safeCheck(), which BLOCKS in a
-// delay(1) loop and returns 0 when nothing arrives in time. That capped
-// throughput at ~10 samples/s AND injected zero samples into every block
-// (garbage -> erratic/phantom heart rates). We read the FIFO ourselves:
-// register 0x05 exposes the write pointer and overflow counter, samples
-// are 6 bytes each (3 red + 3 IR, 18-bit left-aligned).
-#define MAX_FIFO_BYTES 192  // 32 samples * 6 bytes
-#define REG_FIFO_DATA 0x04
-#define REG_FIFO_CFG 0x05
-
-static uint8_t fifoReadReg(TwoWire *bus, uint8_t reg) {
-  bus->beginTransmission(MAX_ADDRESS);
-  bus->write(reg);
-  bus->endTransmission();
-  if (bus->requestFrom(MAX_ADDRESS, (uint8_t)1) != 1) return 0;
-  return (uint8_t)bus->read();
-}
-
-static void fifoReadBurst(TwoWire *bus, uint8_t reg, uint8_t *dst,
-                          uint8_t len) {
-  bus->beginTransmission(MAX_ADDRESS);
-  bus->write(reg);
-  bus->endTransmission();
-  uint8_t got = (uint8_t)bus->requestFrom(MAX_ADDRESS, len);
-  for (uint8_t i = 0; i < got; i++) dst[i] = (uint8_t)bus->read();
-}
-
 void Max30102Sensor::update() {
   if (!online_) return;
   unsigned long now = millis();
@@ -120,11 +131,14 @@ void Max30102Sensor::update() {
   uint8_t ovf = (uint8_t)((cfg >> 1) & 0x03);  // OVF_COUNTER
   uint8_t avail = (uint8_t)((wr - ourRd_) & 0x1F);
 
-  // Overflow means the sensor dropped samples: the buffered stream has a
-  // gap, which corrupts peak timing. Flush and start clean.
+  // Overflow means the sensor dropped samples: the stream now has gaps,
+  // which corrupts peak timing. Flush, clear the latched counter (it
+  // stays set until written to 0 - forgetting this wedges the driver),
+  // and restart the block buffers.
   if (ovf > 0) {
     ourRd_ = wr;
     fifoOvf_++;
+    fifoWriteReg(bus_, REG_FIFO_CFG, (uint8_t)(cfg & (uint8_t)~0x06));
     resetBeatState();
     return;
   }
