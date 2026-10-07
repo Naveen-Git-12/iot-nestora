@@ -14,12 +14,17 @@
 // individual peaks, so an echo inside one beat cannot create a spurious
 // period: the only strong periodicity in a 1 s window is the true beat.
 // Must mirror the sensor sample rate above. Period bounds in samples:
-//   HR 200 -> 6000/200 = 30 samples; HR 40 -> 6000/40 = 150 samples
-#define FS_HZ 100
+//   HR 175 -> 1500/175 = 8.6 samples; HR 40 -> 1500/40 = 37.5 samples
+#define FS_HZ 25
 #define HR_MIN 40
-#define HR_MAX 200
-#define LAG_MIN 30
-#define LAG_MAX 150
+#define HR_MAX 175
+#define LAG_MIN 9
+#define LAG_MAX 37
+// A PPG beat has a dicrotic echo roughly halfway between pulses, so the
+// autocorrelation also peaks at half the true period (reporting ~2x the
+// real rate). We keep the LARGEST lag whose correlation is within this
+// fraction of the best peak, which prefers the true period over its echo.
+#define PEAK_KEEP_RATIO 0.80f
 // A believable periodicity must correlate this well. 0.30 was far too
 // loose: noisy/transition blocks scored just above it and produced
 // nonsense rates like 199 BPM.
@@ -81,9 +86,9 @@ bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
       60,   // LED brightness
       4,    // sampleAverage
       2,    // ledMode: red + IR
-      100,  // sampleRate Hz - measured best (stable 61-65 BPM at rest).
-            // Lowering this let the autocorrelation lock onto a
-            // half-period harmonic and report ~2x the true rate.
+      25,   // sampleRate Hz. The link drains ~25 samples/s, so running
+            // the sensor faster only overruns the 32-deep FIFO and every
+            // overrun resets the filter. 25 Hz keeps ovf at 0.
       411,  // pulseWidth us
       4096  // adcRange
   );
@@ -194,7 +199,8 @@ void Max30102Sensor::update() {
 }
 
 // Autocorrelation HR. Returns BPM, or -1 when no periodicity stands out.
-// n must be exactly Max30102Sensor::BLOCK_N (1 s @100 Hz).
+// Periodicity-based (not peak-based), so it cannot double-count on its own;
+// PEAK_KEEP_RATIO additionally discards the half-period echo.
 static int estimateBpmAutocorr(const uint32_t *samples, int n) {
   static float x[100];
   const int NN = n > 100 ? 100 : n;
@@ -203,10 +209,8 @@ static int estimateBpmAutocorr(const uint32_t *samples, int n) {
   mean /= NN;
   for (int i = 0; i < NN; i++) x[i] = (float)samples[i] - mean;
 
-  // energy-normalised autocorrelation for each candidate lag
-  float best = 0;
-  int bestLag = 0;
-  for (int lag = LAG_MIN; lag <= LAG_MAX && lag < NN; lag++) {
+  auto corrAt = [&](int lag) -> float {
+    if (lag < LAG_MIN || lag > LAG_MAX || lag >= NN) return 0.0f;
     float num = 0, d1 = 0, d2 = 0;
     for (int i = 0; i + lag < NN; i++) {
       num += x[i] * x[i + lag];
@@ -214,33 +218,25 @@ static int estimateBpmAutocorr(const uint32_t *samples, int n) {
       d2 += x[i + lag] * x[i + lag];
     }
     float den = sqrtf(d1 * d2);
-    if (den <= 0) continue;
-    float r = num / den;
-    if (r > best) {
-      best = r;
-      bestLag = lag;
-    }
-  }
-  if (bestLag == 0 || best < AC_MIN_PEAK) return -1;
+    return den > 0 ? num / den : 0.0f;
+  };
 
-  // Parabolic refinement around the correlation peak for sub-sample lag.
-  float prev = 0, cur = 0, next = 0;
-  {
-    auto corrAt = [&](int lag) -> float {
-      if (lag < LAG_MIN || lag > LAG_MAX || lag >= n) return 0;
-      float num = 0, d1 = 0, d2 = 0;
-      for (int i = 0; i + lag < NN; i++) {
-        num += x[i] * x[i + lag];
-        d1 += x[i] * x[i];
-        d2 += x[i + lag] * x[i + lag];
-      }
-      float den = sqrtf(d1 * d2);
-      return den > 0 ? num / den : 0;
-    };
-    cur = corrAt(bestLag);
-    prev = corrAt(bestLag - 1);
-    next = corrAt(bestLag + 1);
+  float best = 0;
+  for (int lag = LAG_MIN; lag <= LAG_MAX && lag < NN; lag++) {
+    float r = corrAt(lag);
+    if (r > best) best = r;
   }
+  if (best < AC_MIN_PEAK) return -1;
+
+  // Largest lag still near the peak = the true period, not its echo.
+  int bestLag = 0;
+  for (int lag = LAG_MIN; lag <= LAG_MAX && lag < NN; lag++) {
+    if (corrAt(lag) >= best * PEAK_KEEP_RATIO) bestLag = lag;
+  }
+  if (bestLag == 0) return -1;
+
+  float prev = corrAt(bestLag - 1), cur = corrAt(bestLag);
+  float next = corrAt(bestLag + 1);
   float shift = 0.0f;
   float denom = (prev - 2 * cur + next);
   if (fabsf(denom) > 1e-9f) shift = 0.5f * (prev - next) / denom;
