@@ -267,12 +267,13 @@ void Max30102Sensor::runMaximBlock() {
   contactLostAt_ = 0;
 
   int bpm = estimateBpmAutocorr(irBuf_, BLOCK_N);
-  // Outlier gate: reject a block that disagrees wildly with the recent
-  // median. A single 199 BPM block must never enter the history that
-  // drives the displayed value.
-  if (bpm > 0 && histCount_ >= 3) {
+  // Outlier gate. With occasional FIFO-overflow gaps a block can come out
+  // far off (e.g. 83 when the true rate is 61). Reject anything that
+  // disagrees with the running median, and protect from the 2nd block on
+  // so early history cannot be poisoned either.
+  if (bpm > 0 && histCount_ >= 2) {
     int med0 = median();
-    if (med0 > 0 && fabsf((float)bpm - (float)med0) / (float)med0 > 0.25f) {
+    if (med0 > 0 && fabsf((float)bpm - (float)med0) / (float)med0 > 0.20f) {
       bpm = -1;
     }
   }
