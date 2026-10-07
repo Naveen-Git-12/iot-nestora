@@ -13,18 +13,12 @@
 // Autocorrelation over the whole block measures PERIODICITY, not
 // individual peaks, so an echo inside one beat cannot create a spurious
 // period: the only strong periodicity in a 1 s window is the true beat.
-// Must mirror the sensor sample rate above. Period bounds in samples:
-//   HR 175 -> 1500/175 = 8.6 samples; HR 40 -> 1500/40 = 37.5 samples
-#define FS_HZ 25
+#define FS_HZ 100
 #define HR_MIN 40
-#define HR_MAX 175
-#define LAG_MIN 9
-#define LAG_MAX 37
-// A PPG beat has a dicrotic echo roughly halfway between pulses, so the
-// autocorrelation also peaks at half the true period (reporting ~2x the
-// real rate). We keep the LARGEST lag whose correlation is within this
-// fraction of the best peak, which prefers the true period over its echo.
-#define PEAK_KEEP_RATIO 0.80f
+#define HR_MAX 200
+// period bounds in samples: 6000/200=30 .. 6000/40=150
+#define LAG_MIN 30
+#define LAG_MAX 150
 // A believable periodicity must correlate this well. 0.30 was far too
 // loose: noisy/transition blocks scored just above it and produced
 // nonsense rates like 199 BPM.
@@ -86,9 +80,7 @@ bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
       60,   // LED brightness
       4,    // sampleAverage
       2,    // ledMode: red + IR
-      25,   // sampleRate Hz. The link drains ~25 samples/s, so running
-            // the sensor faster only overruns the 32-deep FIFO and every
-            // overrun resets the filter. 25 Hz keeps ovf at 0.
+      100,  // sampleRate Hz
       411,  // pulseWidth us
       4096  // adcRange
   );
@@ -115,8 +107,8 @@ void Max30102Sensor::resetBeatState() {
   filled_ = 0;
   blockIrSum_ = 0;
   blockIrCount_ = 0;
-  // fifoCount_/fifoWinAt_ intentionally NOT reset: rate telemetry must
-  // survive a filter reset, otherwise sr/ovf freeze at stale numbers.
+  fifoCount_ = 0;
+  fifoWinAt_ = 0;
   minBpm_ = -1;
   maxBpm_ = -1;
   beatConsistency_ = 0.0f;
@@ -199,8 +191,7 @@ void Max30102Sensor::update() {
 }
 
 // Autocorrelation HR. Returns BPM, or -1 when no periodicity stands out.
-// Periodicity-based (not peak-based), so it cannot double-count on its own;
-// PEAK_KEEP_RATIO additionally discards the half-period echo.
+// n must be exactly Max30102Sensor::BLOCK_N (1 s @100 Hz).
 static int estimateBpmAutocorr(const uint32_t *samples, int n) {
   static float x[100];
   const int NN = n > 100 ? 100 : n;
@@ -209,8 +200,10 @@ static int estimateBpmAutocorr(const uint32_t *samples, int n) {
   mean /= NN;
   for (int i = 0; i < NN; i++) x[i] = (float)samples[i] - mean;
 
-  auto corrAt = [&](int lag) -> float {
-    if (lag < LAG_MIN || lag > LAG_MAX || lag >= NN) return 0.0f;
+  // energy-normalised autocorrelation for each candidate lag
+  float best = 0;
+  int bestLag = 0;
+  for (int lag = LAG_MIN; lag <= LAG_MAX && lag < NN; lag++) {
     float num = 0, d1 = 0, d2 = 0;
     for (int i = 0; i + lag < NN; i++) {
       num += x[i] * x[i + lag];
@@ -218,25 +211,33 @@ static int estimateBpmAutocorr(const uint32_t *samples, int n) {
       d2 += x[i + lag] * x[i + lag];
     }
     float den = sqrtf(d1 * d2);
-    return den > 0 ? num / den : 0.0f;
-  };
-
-  float best = 0;
-  for (int lag = LAG_MIN; lag <= LAG_MAX && lag < NN; lag++) {
-    float r = corrAt(lag);
-    if (r > best) best = r;
+    if (den <= 0) continue;
+    float r = num / den;
+    if (r > best) {
+      best = r;
+      bestLag = lag;
+    }
   }
-  if (best < AC_MIN_PEAK) return -1;
+  if (bestLag == 0 || best < AC_MIN_PEAK) return -1;
 
-  // Largest lag still near the peak = the true period, not its echo.
-  int bestLag = 0;
-  for (int lag = LAG_MIN; lag <= LAG_MAX && lag < NN; lag++) {
-    if (corrAt(lag) >= best * PEAK_KEEP_RATIO) bestLag = lag;
+  // Parabolic refinement around the correlation peak for sub-sample lag.
+  float prev = 0, cur = 0, next = 0;
+  {
+    auto corrAt = [&](int lag) -> float {
+      if (lag < LAG_MIN || lag > LAG_MAX || lag >= n) return 0;
+      float num = 0, d1 = 0, d2 = 0;
+      for (int i = 0; i + lag < NN; i++) {
+        num += x[i] * x[i + lag];
+        d1 += x[i] * x[i];
+        d2 += x[i + lag] * x[i + lag];
+      }
+      float den = sqrtf(d1 * d2);
+      return den > 0 ? num / den : 0;
+    };
+    cur = corrAt(bestLag);
+    prev = corrAt(bestLag - 1);
+    next = corrAt(bestLag + 1);
   }
-  if (bestLag == 0) return -1;
-
-  float prev = corrAt(bestLag - 1), cur = corrAt(bestLag);
-  float next = corrAt(bestLag + 1);
   float shift = 0.0f;
   float denom = (prev - 2 * cur + next);
   if (fabsf(denom) > 1e-9f) shift = 0.5f * (prev - next) / denom;
@@ -266,13 +267,12 @@ void Max30102Sensor::runMaximBlock() {
   contactLostAt_ = 0;
 
   int bpm = estimateBpmAutocorr(irBuf_, BLOCK_N);
-  // Outlier gate. With occasional FIFO-overflow gaps a block can come out
-  // far off (e.g. 83 when the true rate is 61). Reject anything that
-  // disagrees with the running median, and protect from the 2nd block on
-  // so early history cannot be poisoned either.
-  if (bpm > 0 && histCount_ >= 2) {
+  // Outlier gate: reject a block that disagrees wildly with the recent
+  // median. A single 199 BPM block must never enter the history that
+  // drives the displayed value.
+  if (bpm > 0 && histCount_ >= 3) {
     int med0 = median();
-    if (med0 > 0 && fabsf((float)bpm - (float)med0) / (float)med0 > 0.20f) {
+    if (med0 > 0 && fabsf((float)bpm - (float)med0) / (float)med0 > 0.25f) {
       bpm = -1;
     }
   }
