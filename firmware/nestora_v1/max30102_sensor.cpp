@@ -81,21 +81,25 @@ void Max30102Sensor::resetBeatState() {
 
 void Max30102Sensor::update() {
   if (!online_) return;
-  if (!particleSensor.available()) {
-    particleSensor.check();
-    if (!particleSensor.available()) return;
+  // Refresh the cached FIFO pointers first, then drain everything that
+  // is available. The earlier one-sample-per-call path only checked the
+  // pointers when the cache looked empty, so the 32-deep FIFO overflowed
+  // and blocks took ~10 s to accumulate instead of 1 s.
+  particleSensor.check();
+  uint8_t guard = 0;
+  while (particleSensor.available() && guard < 32) {
+    guard++;
+    lastRed_ = particleSensor.getRed();
+    lastIr_ = particleSensor.getIR();
+    particleSensor.nextSample();
+
+    irBuf_[bufIdx_] = lastIr_;
+    redBuf_[bufIdx_] = lastRed_;
+    bufIdx_++;
+    if (filled_ < BLOCK_N) filled_++;
+    blockIrSum_ += lastIr_;
+    blockIrCount_++;
   }
-  lastRed_ = particleSensor.getRed();
-  lastIr_ = particleSensor.getIR();
-  particleSensor.nextSample();
-
-  irBuf_[bufIdx_] = lastIr_;
-  redBuf_[bufIdx_] = lastRed_;
-  bufIdx_++;
-  if (filled_ < BLOCK_N) filled_++;
-  blockIrSum_ += lastIr_;
-  blockIrCount_++;
-
   if (bufIdx_ >= BLOCK_N && filled_ >= BLOCK_N) {
     bufIdx_ = 0;
     runMaximBlock();
