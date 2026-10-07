@@ -13,12 +13,13 @@
 // Autocorrelation over the whole block measures PERIODICITY, not
 // individual peaks, so an echo inside one beat cannot create a spurious
 // period: the only strong periodicity in a 1 s window is the true beat.
-#define FS_HZ 100
+// Must mirror the sensor sample rate above. Period bounds in samples:
+//   HR 200 -> 1500/200 = 7.5 samples; HR 40 -> 1500/40 = 37.5 samples
+#define FS_HZ 25
 #define HR_MIN 40
 #define HR_MAX 200
-// period bounds in samples: 6000/200=30 .. 6000/40=150
-#define LAG_MIN 30
-#define LAG_MAX 150
+#define LAG_MIN 7
+#define LAG_MAX 38
 // A believable periodicity must correlate this well. 0.30 was far too
 // loose: noisy/transition blocks scored just above it and produced
 // nonsense rates like 199 BPM.
@@ -80,7 +81,9 @@ bool Max30102Sensor::begin(TwoWire *bus, uint8_t address) {
       60,   // LED brightness
       4,    // sampleAverage
       2,    // ledMode: red + IR
-      100,  // sampleRate Hz
+      25,   // sampleRate Hz - matches what this I2C link can drain.
+            // At 100 Hz the 32-deep FIFO overran continuously and every
+            // overrun reset the filter history (no stable heart rate).
       411,  // pulseWidth us
       4096  // adcRange
   );

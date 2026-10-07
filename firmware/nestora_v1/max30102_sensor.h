@@ -7,7 +7,9 @@
 //
 // Pipeline (proven LED config: brightness 60, red+IR @100 Hz,
 // both amplitudes 0x24, shared bus SDA GPIO12/SCL GPIO13):
-//   1. 100-sample blocks (1 s) - the length the Maxim routine expects
+//   1. 100-sample blocks at the sensor's 25 Hz rate (4 s) - long enough
+//      for a solid autocorrelation, and it matches what the I2C link can
+//      drain so the FIFO never overruns
 //   2. HR from energy-normalised AUTOCORRELATION over the block.
 //      Periodic, not peak-based: an echo inside one beat (dicrotic
 //      notch) cannot form a spurious period, which is what doubled the
