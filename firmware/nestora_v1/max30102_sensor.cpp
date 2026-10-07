@@ -22,7 +22,7 @@
 // A believable periodicity must correlate this well. 0.30 was far too
 // loose: noisy/transition blocks scored just above it and produced
 // nonsense rates like 199 BPM.
-#define AC_MIN_PEAK 0.55f
+#define AC_MIN_PEAK 0.35f
 // Ceiling for the estimator. Pregnancy effort tops out around 160-170;
 // anything above this is optical artifact (dicrotic echo, contact
 // transient, motion), not a heart rate.
