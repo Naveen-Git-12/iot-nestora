@@ -138,7 +138,7 @@ class _NutritionScreenState extends State<NutritionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
+    final _body = SafeArea(
       child: RefreshIndicator(
         onRefresh: _load,
         child: SingleChildScrollView(
@@ -150,18 +150,22 @@ class _NutritionScreenState extends State<NutritionScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Nutrition',
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Nutrition',
                           style: TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
                               color: Color(0xFF14142B))),
-                      Text("Today's intake",
-                          style: TextStyle(
-                              fontSize: 13, color: Color(0xFF7D6B82))),
-                    ],
+                        Text("Today's intake",
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 13, color: Color(0xFF7D6B82))),
+                      ],
+                    ),
                   ),
                   if (_loading)
                     const SizedBox(
@@ -199,6 +203,25 @@ class _NutritionScreenState extends State<NutritionScreen> {
           ),
         ),
       ),
+    );
+
+    // When hosted inside the Home IndexedStack the parent already draws the
+    // bar, so show nothing extra. When pushed as a route (a Quick Action) this
+    // Scaffold supplies the AppBar and therefore the back button - without it
+    // the user lands on a screen with no way back, which reads as a black page.
+    final pushed = Navigator.of(context).canPop();
+    return Scaffold(
+      backgroundColor: const Color(0xFFFDF7FB),
+      appBar: !pushed
+          ? null
+          : AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              title: const Text('Nutrition Tracker',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+            ),
+      body: _body,
     );
   }
 
@@ -397,9 +420,14 @@ class _NutritionScreenState extends State<NutritionScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _calorieCircle('Consumed', _calConsumed, _calTarget, Colors.white),
-          _calorieCircle('Remaining', remaining, _calTarget, Colors.white70),
-          _calorieCircle('Burned', 320, 1000, Colors.white70),
+          Expanded(
+              child: _calorieCircle(
+                  'Consumed', _calConsumed, _calTarget, Colors.white)),
+          Expanded(
+              child: _calorieCircle(
+                  'Remaining', remaining, _calTarget, Colors.white70)),
+          Expanded(
+              child: _calorieCircle('Burned', 320, 1000, Colors.white70)),
         ],
       ),
     );
@@ -477,6 +505,8 @@ class _NutritionScreenState extends State<NutritionScreen> {
           SizedBox(
               width: 70,
               child: Text(name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w500))),
           Expanded(
@@ -494,6 +524,8 @@ class _NutritionScreenState extends State<NutritionScreen> {
           SizedBox(
               width: 70,
               child: Text('$current/$goal$unit',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       fontSize: 11, color: Color(0xFF7D6B82)),
                   textAlign: TextAlign.right)),
@@ -521,22 +553,37 @@ class _NutritionScreenState extends State<NutritionScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Water Intake',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              Text('$_water/$_waterTarget glasses',
-                  style: const TextStyle(
-                      color: Color(0xFF3B82F6),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13)),
+              const Expanded(
+                child: Text('Water Intake',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text('$_water/$_waterTarget glasses',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(
+                        color: Color(0xFF3B82F6),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13)),
+              ),
             ],
           ),
           const SizedBox(height: 4),
           const Text('Tap a glass to update',
               style: TextStyle(fontSize: 11, color: Color(0xFF7D6B82))),
           const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: List.generate(_waterTarget, (i) {
+          // Wrap rather than Row: a target larger than the width used to
+          // overflow, and spaceEvenly of many icons has no slack.
+          Wrap(
+            alignment: WrapAlignment.spaceEvenly,
+            spacing: 4,
+            runSpacing: 4,
+            children: List.generate(_waterTarget.clamp(1, 16), (i) {
               final filled = i < _water;
               return GestureDetector(
                 onTap: () => _toggleWater(i),
@@ -576,14 +623,27 @@ class _NutritionScreenState extends State<NutritionScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(meal,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16)),
-              Row(
-                children: [
-                  Text(time,
-                      style: const TextStyle(
-                          fontSize: 12, color: Color(0xFF7D6B82))),
+              Expanded(
+                child: Text(meal,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Row(
+                  // Not mainAxisSize.min: a Flexible child of a min-sized
+                  // Row receives no share of the width, leaving the time at
+                  // its full intrinsic width and overflowing the card.
+                  children: [
+                  Flexible(
+                    child: Text(time,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF7D6B82))),
+                  ),
                   const SizedBox(width: 8),
                   GestureDetector(
                     onTap: onAdd,
@@ -598,7 +658,8 @@ class _NutritionScreenState extends State<NutritionScreen> {
                           size: 18, color: Color(0xFFFF2D95)),
                     ),
                   ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
@@ -615,18 +676,29 @@ class _NutritionScreenState extends State<NutritionScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Container(
-                  width: 6,
-                  height: 6,
-                  decoration: const BoxDecoration(
-                      color: Color(0xFFFF2D95), shape: BoxShape.circle)),
-              const SizedBox(width: 8),
-              Text(name, style: const TextStyle(fontSize: 13)),
-            ],
+          // Expanded: a long food name would otherwise push the calorie
+          // figure and the delete icon off the right edge.
+          Expanded(
+            child: Row(
+              children: [
+                Container(
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(
+                        color: Color(0xFFFF2D95), shape: BoxShape.circle)),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13)),
+                ),
+              ],
+            ),
           ),
+          const SizedBox(width: 8),
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Text('$cal cal',
                   style: const TextStyle(

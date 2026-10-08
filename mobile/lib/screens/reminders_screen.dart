@@ -37,7 +37,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
     final pending = _reminders.where((r) => !r['done']).toList();
     final completed = _reminders.where((r) => r['done']).toList();
 
-    return SafeArea(
+    final _body = SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -46,7 +46,16 @@ class _RemindersScreenState extends State<RemindersScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Reminders', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF14142B))),
+                const Expanded(
+                  child: Text('Reminders',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF14142B))),
+                ),
+                const SizedBox(width: 12),
                 GestureDetector(
                   onTap: () => _showAddSheet(),
                   child: Container(
@@ -112,6 +121,25 @@ class _RemindersScreenState extends State<RemindersScreen> {
         ),
       ),
     );
+
+    // When hosted inside the Home IndexedStack the parent already draws the
+    // bar, so show nothing extra. When pushed as a route (a Quick Action) this
+    // Scaffold supplies the AppBar and therefore the back button - without it
+    // the user lands on a screen with no way back, which reads as a black page.
+    final pushed = Navigator.of(context).canPop();
+    return Scaffold(
+      backgroundColor: const Color(0xFFFDF7FB),
+      appBar: !pushed
+          ? null
+          : AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              title: const Text('Reminders',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+            ),
+      body: _body,
+    );
   }
 
   Widget _reminderCard(Map<String, dynamic> r) {
@@ -140,11 +168,15 @@ class _RemindersScreenState extends State<RemindersScreen> {
               children: [
                 Row(
                   children: [
-                    Text(r['title'], style: TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 14,
-                      decoration: done ? TextDecoration.lineThrough : null,
-                      color: done ? Colors.grey : const Color(0xFF14142B),
-                    )),
+                    // Flexible so a long reminder title ellipsises instead
+                    // of overflowing against the "Daily" badge.
+                    Flexible(
+                      child: Text(r['title'], maxLines: 2, style: TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 14,
+                        decoration: done ? TextDecoration.lineThrough : null,
+                        color: done ? Colors.grey : const Color(0xFF14142B),
+                      )),
+                    ),
                     if (r['recurring']) ...[
                       const SizedBox(width: 6),
                       Container(
@@ -163,9 +195,17 @@ class _RemindersScreenState extends State<RemindersScreen> {
               ],
             ),
           ),
-          Column(
-            children: [
-              Text(r['time'], style: const TextStyle(fontSize: 11, color: Color(0xFF7D6B82))),
+          // Flexible: at a large text scale this column grew wider than the
+          // row could spare and pushed the whole card past the edge.
+          Flexible(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+              Text(r['time'],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF7D6B82))),
               const SizedBox(height: 6),
               GestureDetector(
                 onTap: () {
@@ -177,7 +217,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
                   size: 22,
                 ),
               ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -250,9 +291,13 @@ class _RemindersScreenState extends State<RemindersScreen> {
                           const Icon(Icons.access_time,
                               size: 18, color: Color(0xFFFF2D95)),
                           const SizedBox(width: 8),
-                          Text(pickedTime.format(context),
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w600)),
+                          Expanded(
+                            child: Text(pickedTime.format(context),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600)),
+                          ),
                         ],
                       ),
                     ),

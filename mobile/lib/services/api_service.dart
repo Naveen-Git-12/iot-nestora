@@ -112,6 +112,13 @@ class ApiService {
     return Map<String, dynamic>.from(fallbackVitals);
   }
 
+  /// Manually entered BP history (GET /api/vitals/{id}/bp).
+  static Future<List<dynamic>> getBpHistory(String patientId) async {
+    final data = await _get('/api/vitals/$patientId/bp');
+    if (data is List) return data;
+    return const [];
+  }
+
   static Future<Map<String, dynamic>> getRisk(String patientId) async {
     final data = await _get('/api/risk/$patientId');
     if (data is Map<String, dynamic> && data['risk_level'] != null) {

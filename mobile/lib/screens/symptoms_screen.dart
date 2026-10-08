@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../services/api_service.dart';
+import '../services/session_service.dart';
 
 class SymptomsScreen extends StatelessWidget {
   const SymptomsScreen({super.key});
@@ -16,7 +18,14 @@ class _SymptomsBody extends StatefulWidget {
 
 class _SymptomsBodyState extends State<_SymptomsBody> {
   int _selectedFilter = 0;
-  final _filters = ['All', 'Headache', 'Swelling', 'Nausea', 'Fatigue', 'Back Pain', 'Mood'];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFromServer();
+  }
+  /// Built from the enum so a new symptom cannot be forgotten here.
+  late final _filters = ['All', ..._SymptomType.values.map((e) => e.label)];
 
   final List<_SymptomEntry> _symptoms = [
     _SymptomEntry(
@@ -76,6 +85,52 @@ class _SymptomsBodyState extends State<_SymptomsBody> {
     return _symptoms.where((s) => s.type.label.toLowerCase() == filterName).toList();
   }
 
+  /// Load what the server already holds so the list survives a restart and
+  /// the doctor sees the same entries.
+  Future<void> _loadFromServer() async {
+    final profile = await SessionService.loadProfile();
+    final pid = profile['patientId'] ?? 'P001';
+    try {
+      final data = await ApiService.getSymptoms(pid);
+      if (!mounted || data.isEmpty) return;
+      final entries = <_SymptomEntry>[];
+      for (final raw in data) {
+        if (raw is Map) {
+          entries.add(_SymptomEntry.fromJson(Map<String, dynamic>.from(raw)));
+        }
+      }
+      if (!mounted || entries.isEmpty) return;
+      setState(() {
+        // Merge: server entries first, then anything only held locally.
+        final seen = entries.map((e) => '${e.type.label}|${e.timestamp}').toSet();
+        final localOnly = _symptoms
+            .where((e) => !seen.contains('${e.type.label}|${e.timestamp}'))
+            .toList();
+        _symptoms
+          ..clear()
+          ..addAll(entries)
+          ..addAll(localOnly);
+      });
+    } catch (_) {
+      // Offline: the local list stays as it is.
+    }
+  }
+
+  /// Persist a new entry. A failure is non-fatal: the entry is already in the
+  /// list, so the mother does not lose what she just typed.
+  Future<void> _send(_SymptomEntry entry) async {
+    final profile = await SessionService.loadProfile();
+    final pid = profile['patientId'] ?? 'P001';
+    try {
+      await ApiService.postSymptom(entry.toJson(pid));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Saved on this phone only - server unreachable.'),
+      ));
+    }
+  }
+
   void _showLogBottomSheet() {
     showModalBottomSheet(
       context: context,
@@ -83,20 +138,19 @@ class _SymptomsBodyState extends State<_SymptomsBody> {
       backgroundColor: Colors.transparent,
       builder: (_) => _LogBottomSheet(
         onSave: (type, severity, description) {
-          setState(() {
-            _symptoms.insert(
-              0,
-              _SymptomEntry(
-                type: type,
-                severity: severity,
-                description: description.isEmpty
-                    ? 'No description provided.'
-                    : description,
-                timestamp: DateTime.now(),
-                flagged: severity >= 4,
-              ),
-            );
-          });
+          final entry = _SymptomEntry(
+            type: type,
+            severity: severity,
+            description: description.isEmpty
+                ? type.hint
+                : description,
+            timestamp: DateTime.now(),
+            // Severity 4+ is a warning sign, and so is any symptom the
+            // backend treats as concerning on its own.
+            flagged: severity >= 4 || type.concerning,
+          );
+          setState(() => _symptoms.insert(0, entry));
+          _send(entry);
         },
       ),
     );
@@ -108,6 +162,19 @@ class _SymptomsBodyState extends State<_SymptomsBody> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8FC),
+      // Pushed as a Quick Action this is the only way back; inside the Home
+      // IndexedStack the parent bar is what the user sees, and this AppBar
+      // simply stays empty of a back button (canPop is false there).
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        automaticallyImplyLeading: Navigator.of(context).canPop(),
+        title: Navigator.of(context).canPop()
+            ? const Text('Log Symptom',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600))
+            : const SizedBox.shrink(),
+      ),
       body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -117,14 +184,19 @@ class _SymptomsBodyState extends State<_SymptomsBody> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Symptoms',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF14142B),
+                  const Expanded(
+                    child: Text(
+                      'Symptoms',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF14142B),
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 12),
                   GestureDetector(
                     onTap: _showLogBottomSheet,
                     child: Container(
@@ -281,17 +353,64 @@ class _SymptomsBodyState extends State<_SymptomsBody> {
 
 // ─── Symptom Types ──────────────────────────────────────────────────────────
 
+/// Symptoms a pregnant woman may report. `concerning` marks the ones the
+/// backend risk engine treats as a warning sign, so the badge on the card
+/// matches the server rather than being a second, divergent list.
 enum _SymptomType {
-  headache('Headache', Icons.psychology_outlined),
-  swelling('Swelling', Icons.water_drop_outlined),
-  nausea('Nausea', Icons.sick_outlined),
-  fatigue('Fatigue', Icons.battery_1_bar_outlined),
-  backPain('Back Pain', Icons.accessibility_new_outlined),
-  mood('Mood', Icons.sentiment_neutral_outlined);
+  headache('Headache', Icons.psychology_outlined, true,
+      'A persistent headache, especially one that will not settle.'),
+  swelling('Swelling', Icons.water_drop_outlined, true,
+      'Swelling of the face, hands or feet that appears suddenly.'),
+  nausea('Nausea', Icons.sick_outlined, false,
+      'Nausea or vomiting, common in early pregnancy.'),
+  fatigue('Fatigue', Icons.battery_1_bar_outlined, false,
+      'Unusual tiredness beyond what the stage of pregnancy explains.'),
+  backPain('Back Pain', Icons.accessibility_new_outlined, false,
+      'Lower back ache, common as the centre of gravity shifts.'),
+  mood('Mood', Icons.sentiment_neutral_outlined, false,
+      'Mood changes, anxiety or low mood.'),
+
+  // ── pregnancy-specific warning signs ────────────────────────────────────
+  bleeding('Vaginal Bleeding', Icons.bloodtype_outlined, true,
+      'Any bleeding or spotting. Report this straight away.'),
+  reducedMovement('Reduced Fetal Movement', Icons.child_care_outlined, true,
+      'Fewer or weaker movements than usual for your baby.'),
+  visionChanges('Vision Changes', Icons.visibility_outlined, true,
+      'Blurred vision, flashing lights or spots.'),
+  abdominalPain('Abdominal Pain', Icons.healing_outlined, true,
+      'Persistent pain in the upper abdomen or under the ribs.'),
+  contractions('Contractions', Icons.waves_outlined, true,
+      'Regular tightenings that do not ease with rest.'),
+  dizziness('Dizziness', Icons.blur_circular, true,
+      'Light-headedness or feeling faint.'),
+  itching('Generalised Itching', Icons.back_hand_outlined, true,
+      'Itching without a rash, especially on the palms and soles.'),
+  fever('Fever', Icons.thermostat_outlined, true,
+      'A raised temperature.'),
+  heartburn('Heartburn', Icons.local_fire_department_outlined, false,
+      'Burning reflux, a very common complaint.'),
+  breathlessness('Breathlessness', Icons.air_outlined, false,
+      'Shortness of breath on mild exertion.'),
+  urinary('Urinary Discomfort', Icons.water_outlined, false,
+      'Burning or frequent urination.');
+
+  const _SymptomType(this.label, this.icon, this.concerning, this.hint);
 
   final String label;
   final IconData icon;
-  const _SymptomType(this.label, this.icon);
+  final bool concerning;
+  final String hint;
+
+  /// Wire value for the backend, e.g. "Reduced Fetal Movement".
+  String get apiValue => label;
+
+  static _SymptomType? fromLabel(String value) {
+    final v = value.trim().toLowerCase();
+    for (final t in _SymptomType.values) {
+      if (t.label.toLowerCase() == v) return t;
+    }
+    return null;
+  }
 }
 
 // ─── Symptom Entry Model ────────────────────────────────────────────────────
@@ -302,6 +421,25 @@ class _SymptomEntry {
   final String description;
   final DateTime timestamp;
   final bool flagged;
+
+  _SymptomEntry.fromJson(Map<String, dynamic> m)
+      : type = _SymptomType.fromLabel('${m['symptom_type'] ?? ''}') ??
+            _SymptomType.mood,
+        severity = (m['severity'] is num)
+            ? (m['severity'] as num).toInt()
+            : int.tryParse('${m['severity']}') ?? 1,
+        description = '${m['description'] ?? ''}',
+        timestamp =
+            DateTime.tryParse('${m['timestamp'] ?? ''}') ?? DateTime.now(),
+        flagged = m['ai_flagged'] == true;
+
+  Map<String, dynamic> toJson(String patientId) => {
+        'patient_id': patientId,
+        'symptom_type': type.apiValue,
+        'severity': severity,
+        'description': description,
+        'ai_flagged': flagged,
+      };
 
   const _SymptomEntry({
     required this.type,
@@ -364,36 +502,46 @@ class _SymptomCard extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          symptom.type.label,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF14142B),
+                        Flexible(
+                          child: Text(
+                            symptom.type.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF14142B),
+                            ),
                           ),
                         ),
                         if (symptom.flagged) ...[
                           const SizedBox(width: 8),
-                          Container(
+                          Flexible(
+                            child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
                               color: const Color(0xFFFF2D95).withOpacity(0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.flag, color: Color(0xFFFF2D95), size: 12),
-                                SizedBox(width: 3),
-                                Text(
-                                  'AI Flagged',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFFFF2D95),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.flag, color: Color(0xFFFF2D95), size: 12),
+                                  SizedBox(width: 3),
+                                  Flexible(
+                                    child: Text(
+                                      'AI Flagged',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFFFF2D95),
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ],
@@ -413,12 +561,14 @@ class _SymptomCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Row(
+          // Wrap: five fixed 24+5px bars overflowed a narrow card.
+          Wrap(
+            spacing: 5,
+            runSpacing: 4,
             children: List.generate(5, (index) {
               return Container(
                 width: 24,
                 height: 8,
-                margin: const EdgeInsets.only(right: 5),
                 decoration: BoxDecoration(
                   color: index < symptom.severity
                       ? const Color(0xFFFF2D95)
@@ -459,14 +609,7 @@ class _LogBottomSheetState extends State<_LogBottomSheet> {
   double _severity = 3;
   final _descriptionController = TextEditingController();
 
-  final _symptomTypes = const [
-    (_SymptomType.headache, 'Headache'),
-    (_SymptomType.swelling, 'Swelling'),
-    (_SymptomType.nausea, 'Nausea'),
-    (_SymptomType.fatigue, 'Fatigue'),
-    (_SymptomType.backPain, 'Back Pain'),
-    (_SymptomType.mood, 'Mood'),
-  ];
+  final _symptomTypes = _SymptomType.values;
 
   @override
   void dispose() {
@@ -534,7 +677,8 @@ class _LogBottomSheetState extends State<_LogBottomSheet> {
               ),
               itemCount: _symptomTypes.length,
               itemBuilder: (context, index) {
-                final (type, label) = _symptomTypes[index];
+                final type = _symptomTypes[index];
+                final label = type.label;
                 final selected = _selectedType == type;
                 return GestureDetector(
                   onTap: () => setState(() => _selectedType = type),

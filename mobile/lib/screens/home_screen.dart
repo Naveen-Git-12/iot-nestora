@@ -57,7 +57,7 @@ class _DashboardTabState extends State<_DashboardTab> {
   String _name = '...';
   int _week = 28;
   String _due = 'Sep 15, 2026';
-  int _age = 27;
+  int _age = 27;   // shown in the dashboard greeting
   Map<String, dynamic> _vitals = Map.from(ApiService.fallbackVitals);
   Map<String, dynamic> _risk = Map.from(ApiService.fallbackRisk);
   bool _loading = true;
@@ -194,13 +194,13 @@ class _DashboardTabState extends State<_DashboardTab> {
       _name = name.isEmpty ? 'Priya' : name;
       _week = profile['week'] as int? ?? 28;
       _due = profile['due'] as String? ?? 'Sep 15, 2026';
-      _age = profile['age'] as int? ?? 27;
+      _age = (profile['age'] as num?)?.toInt() ?? 27;
       _emergencyContact = profile['emergency'] as String? ?? '';
       _vitals = results[0] as Map<String, dynamic>;
       _risk = results[1] as Map<String, dynamic>;
       // BP is manual: reflect whether it was actually recorded, and when.
-      _bpRecorded = _vitals['bp_logged_at'] != null ||
-          (results[0] as Map<String, dynamic>)['bp_source'] != null;
+      _bpRecorded =
+          _vitals['bp_logged_at'] != null || _vitals['bp_source'] != null;
       _bpLoggedAt = (_vitals['bp_logged_at'] as String?) ?? '';
       _loading = false;
     });
@@ -254,6 +254,13 @@ class _DashboardTabState extends State<_DashboardTab> {
         ),
       );
     });
+  }
+
+  /// Safe title case: an empty or unexpected risk_level must not throw.
+  static String _titleCase(String v) {
+    final t = v.trim();
+    if (t.isEmpty) return 'Unknown';
+    return t[0].toUpperCase() + t.substring(1);
   }
 
   static String _shortDate(String iso) {
@@ -477,21 +484,28 @@ class _DashboardTabState extends State<_DashboardTab> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Hello, ${_name.split(' ').first}!',
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      Text('Week $_week of pregnancy',
-                          style: const TextStyle(
-                              color: Colors.grey, fontSize: 14)),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Hello, ${_name.split(' ').first}!',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        Text('Week $_week • $_age yrs',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: Colors.grey, fontSize: 14)),
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 12),
                   GestureDetector(
                     onTap: () async {
                       await Navigator.pushNamed(context, '/profile');
@@ -558,67 +572,88 @@ class _DashboardTabState extends State<_DashboardTab> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Current Vitals',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  Row(
-                    children: [
-                      if (_loading)
-                        const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2)),
-                      if (_loading) const SizedBox(width: 8),
-                      _bleChip(),
-                    ],
+                  const Expanded(
+                    child: Text('Current Vitals',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
                   ),
+                  const SizedBox(width: 12),
+                  if (_loading)
+                    const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                  if (_loading) const SizedBox(width: 8),
+                  // Flexible directly on the chip: wrapping it in a Row and
+                  // making that Flexible left the chip with an unbounded
+                  // width, so the label ran past the header.
+                  Flexible(child: _bleChip()),
                 ],
               ),
               const SizedBox(height: 12),
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 1.4,
-                children: [
-                  _vitalCard('Heart Rate', hrText, Icons.favorite,
-                      hrColor,
-                      live: hrLiveDot, source: 'Wearable'),
-                  _vitalCard('SpO2', '$spo2%', Icons.water_drop, Colors.blue,
-                      source: 'Wearable'),
-                  GestureDetector(
-                    onTap: _logBp,
-                    child: _vitalCard(
-                      'Blood Pressure',
-                      _bpRecorded ? '$sys/$dia' : 'Not recorded',
-                      Icons.monitor_heart,
-                      _bpRecorded ? Colors.purple : Colors.grey,
-                      source: _bpRecorded ? 'Manual entry' : 'Tap to record',
-                      sourceColor:
-                          _bpRecorded ? Colors.purple : Colors.orange,
-                    ),
-                  ),
-                ],
+              // Wrap, not GridView.count: a grid needs a fixed aspect ratio,
+              // and the height this tile actually wants (~120px) does not fit
+              // the ratio that the available width allows. That mismatch is
+              // what produced the overflow stripes on the dashboard.
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final tileWidth = (constraints.maxWidth - 12) / 2;
+                  Widget tile(Widget child) => SizedBox(
+                        width: tileWidth,
+                        child: child,
+                      );
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      tile(_vitalCard('Heart Rate', hrText, Icons.favorite,
+                          hrColor,
+                          live: hrLiveDot, source: 'Wearable')),
+                      tile(_vitalCard('SpO2', '$spo2%',
+                          Icons.water_drop, Colors.blue, source: 'Wearable')),
+                      tile(GestureDetector(
+                        onTap: _logBp,
+                        child: _vitalCard(
+                          'Blood Pressure',
+                          _bpRecorded ? '$sys/$dia' : 'Not recorded',
+                          Icons.monitor_heart,
+                          _bpRecorded ? Colors.purple : Colors.grey,
+                          source:
+                              _bpRecorded ? 'Manual entry' : 'Tap to record',
+                          sourceColor:
+                              _bpRecorded ? Colors.purple : Colors.orange,
+                        ),
+                      )),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 8),
+              // Both labels are Flexible: as unbounded siblings they would
+              // overflow the row on a narrow device or at a large text scale.
               Row(
                 children: [
                   const Icon(Icons.sync, size: 13, color: Colors.grey),
                   const SizedBox(width: 5),
-                  Text(_relativeSync(),
-                      style: const TextStyle(
-                          fontSize: 11, color: Colors.grey)),
+                  Flexible(
+                    child: Text(_relativeSync(),
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.grey)),
+                  ),
                   if (_bpLoggedAt.isNotEmpty) ...[
                     const SizedBox(width: 12),
                     const Icon(Icons.history,
                         size: 13, color: Colors.grey),
                     const SizedBox(width: 5),
-                    Text('BP logged ${_shortDate(_bpLoggedAt)}',
-                        style: const TextStyle(
-                            fontSize: 11, color: Colors.grey)),
+                    Flexible(
+                      child: Text('BP logged ${_shortDate(_bpLoggedAt)}',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.grey)),
+                    ),
                   ],
                 ],
               ),
@@ -647,7 +682,7 @@ class _DashboardTabState extends State<_DashboardTab> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                              'Current risk: ${riskLevel[0].toUpperCase()}${riskLevel.substring(1)}',
+                              'Current risk: ${_titleCase(riskLevel)}',
                               style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   color: riskColor)),
@@ -659,13 +694,21 @@ class _DashboardTabState extends State<_DashboardTab> {
                           GestureDetector(
                             onTap: _showRiskDetails,
                             child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(
-                                  'View Risk Details',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: riskColor),
+                                // Flexible: the label and the chevron are
+                                // unbounded Row children, so on a narrow
+                                // screen the label ran past the edge.
+                                Flexible(
+                                  child: Text(
+                                    'View Risk Details',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: riskColor),
+                                  ),
                                 ),
                                 const SizedBox(width: 2),
                                 Icon(Icons.chevron_right,
@@ -755,11 +798,21 @@ class _DashboardTabState extends State<_DashboardTab> {
             else
               Icon(Icons.bluetooth, size: 14, color: color),
             const SizedBox(width: 4),
-            Text(label,
+            // ConstrainedBox rather than Flexible: a Flexible child of a
+            // mainAxisSize.min Row receives no share of the width, which
+            // left the label at its full intrinsic width.
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 64),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: color)),
+                    color: color),
+              ),
+            ),
           ],
         ),
       ),
@@ -785,10 +838,10 @@ class _DashboardTabState extends State<_DashboardTab> {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: color, size: 24),
-          const Spacer(),
+          const SizedBox(height: 10),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
@@ -818,13 +871,16 @@ class _DashboardTabState extends State<_DashboardTab> {
           ),
           if (source != null) ...[
             const SizedBox(height: 2),
-            Text(
-              source,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w600,
-                  color: sourceColor ?? Colors.grey.shade500),
+            Flexible(
+              child: Text(
+                source,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: sourceColor ?? Colors.grey.shade500),
+              ),
             ),
           ],
         ],

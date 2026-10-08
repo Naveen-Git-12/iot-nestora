@@ -17,6 +17,7 @@ class _LandingScreenState extends State<LandingScreen>
   late Animation<Offset> _slideUp;
   late Animation<double> _scaleIn;
 
+  Timer? _navTimer;
   final String _brandName = 'NESTORA';
   late List<AnimationController> _letterControllers;
   late List<Animation<double>> _letterOpacities;
@@ -72,7 +73,10 @@ class _LandingScreenState extends State<LandingScreen>
 
     _startAnimations();
 
-    Timer(const Duration(seconds: 3), () {
+    // Held in a field so dispose() can cancel it. An orphaned timer fires
+    // after the widget is gone and trips the "timer still pending"
+    // assertion in tests.
+    _navTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/login');
       }
@@ -94,6 +98,8 @@ class _LandingScreenState extends State<LandingScreen>
 
   @override
   void dispose() {
+    _navTimer?.cancel();
+    _navTimer = null;
     _fadeController.dispose();
     _slideController.dispose();
     _scaleController.dispose();
