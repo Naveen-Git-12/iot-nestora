@@ -1,30 +1,42 @@
-// This is a basic Flutter widget test.
+// Smoke tests for NESTORA.
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// These replace the default Flutter counter template, which referenced a
+// `MyApp` class that this project never had and so failed to compile.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:nestora_mobile/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  setUp(() {
+    // LoginScreen reads SharedPreferences on init; without a mock the
+    // platform channel throws and the screen never builds.
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  testWidgets('app boots, animates and reaches the login screen without '
+      'throwing', (WidgetTester tester) async {
+    await tester.pumpWidget(const NestoraApp());
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+    // The landing screen holds a 3s navigation timer plus a per-letter
+    // animation chain, so pump past all of them; leaving a timer pending
+    // trips the test binding's "timersPending" assertion.
+    await tester.pump(const Duration(seconds: 4));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    expect(find.byType(MaterialApp), findsOneWidget);
+  });
+
+  testWidgets('landing screen hands over to login', (WidgetTester tester) async {
+    await tester.pumpWidget(const NestoraApp());
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Registered Patient Access'), findsOneWidget);
   });
 }
