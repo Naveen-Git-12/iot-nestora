@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { fetchPatients, fetchPatient, fetchVitals, fetchLatestVital, fetchSymptoms, fetchRisk, enrollPatient } from './services/api';
 import type { Patient, Vital, Symptom, RiskAssessment } from './types';
 import './App.css';
@@ -12,18 +12,21 @@ function formatWhen(iso?: string | null) {
   return d.toLocaleString();
 }
 
+// [normalLow, normalHigh, warningLow, dangerLow]
+// A value is "Elevated" when it is outside the normal band but not
+// critically so, and "Critical" when it passes the danger threshold.
 function getVitalTrend(type: string, value: number): { label: string; status: string } {
   const ranges: Record<string, [number, number, number, number]> = {
-    heart_rate: [60, 90, 100, 120],
+    heart_rate: [60, 90, 50, 40],
     spo2: [95, 100, 93, 90],
-    temperature: [36.1, 37.2, 37.5, 38.5],
+    temperature: [36.1, 37.2, 35.8, 35.0],
     bp_systolic: [90, 130, 140, 160],
   };
   const r = ranges[type];
-  if (!r) return { label: 'Normal', status: 'normal' };
+  if (!r || !Number.isFinite(value)) return { label: 'Normal', status: 'normal' };
   if (value >= r[0] && value <= r[1]) return { label: 'Normal', status: 'normal' };
-  if (value <= r[2]) return { label: 'Elevated', status: 'warning' };
-  return { label: 'Critical', status: 'danger' };
+  if (value <= r[3] || value >= r[2]) return { label: 'Critical', status: 'danger' };
+  return { label: 'Elevated', status: 'warning' };
 }
 
 
@@ -85,33 +88,63 @@ function App() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [vitals, setVitals] = useState<Vital[]>([]);
   const [symptoms, setSymptoms] = useState<Symptom[]>([]);
-  const [, setLoading] = useState(true);
   const [risk, setRisk] = useState<RiskAssessment | null>(null);
   const [showEnroll, setShowEnroll] = useState(false);
   const [enrollMsg, setEnrollMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const cancelledRef = useRef(false);
 
-  useEffect(() => {
-    // Live-device view: keep only patients with a fresh wearable
-    // reading (GET .../latest merged with live:true). Mock-only
-    // patients are hidden so the dashboard shows the real device.
-    fetchPatients()
-      .then(async (data) => {
-        const list = Array.isArray(data) ? data : [];
-        const checks = await Promise.all(
-          list.map(async (p: Patient) => {
-            try {
-              const latest = await fetchLatestVital(p.id);
-              return latest && latest.live === true ? p : null;
-            } catch {
-              return null;
-            }
-          })
+  const load = async () => {
+    try {
+      const data = await fetchPatients();
+      const list: Patient[] = Array.isArray(data) ? data : [];
+      const checks = await Promise.all(
+        list.map(async (p: Patient) => {
+          try {
+            const latest = await fetchLatestVital(p.id);
+            return { ...p, live: latest?.live === true } as Patient & { live: boolean };
+          } catch {
+            // A failed lookup must not hide the patient.
+            return { ...p, live: false } as Patient & { live: boolean };
+          }
+        })
+      );
+      if (cancelledRef.current) return;
+      // Live-connected patients first, then alphabetical, so the band
+      // that is actually reporting is always at the top of the list.
+      checks.sort((a, b) => {
+        if (a.live !== b.live) return a.live ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      setPatients(checks as Patient[]);
+      setError(null);
+    } catch (e) {
+      if (!cancelledRef.current) {
+        setError(
+          'Could not reach the backend. Start it with "uvicorn app.main:app" ' +
+            'in the backend folder, then reload.'
         );
-        setPatients(checks.filter((p): p is Patient => p !== null));
-        setLoading(false);
-      })
-      .catch(console.error);
+      }
+    } finally {
+      if (!cancelledRef.current) setLoading(false);
+    }
+  };
+
+  // Loads every enrolled patient. A wearable reading marks a patient as
+  // "live" for display only - it must never remove a patient from the
+  // list, otherwise the dashboard is empty whenever the band is off.
+  useEffect(() => {
+    cancelledRef.current = false;
+    load();
+    // Poll so a band that connects later appears without a manual reload.
+    const timer = setInterval(() => load(), 5000);
+    return () => {
+      cancelledRef.current = true;
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
   const openPatient = async (id: string) => {
@@ -146,6 +179,7 @@ function App() {
     }
   };
 
+  const liveCount = patients.filter((p) => p.live).length;
   const highRisk = patients.filter((p) => p.risk_level === 'high').length;
   const medRisk = patients.filter((p) => p.risk_level === 'medium').length;
   const lowRisk = patients.filter((p) => p.risk_level === 'low').length;
@@ -208,12 +242,18 @@ function App() {
       </aside>
 
       <main className="main">
+        {error && (
+          <div className="alert-banner">
+            <strong>Backend not reachable.</strong> {error}
+          </div>
+        )}
+
         {view === 'overview' && (
           <>
             <div className="page-header">
               <div>
                 <h1 className="page-title">Dashboard Overview</h1>
-                <p className="page-subtitle">Live wearable patients only</p>
+                <p className="page-subtitle">All enrolled patients. Those with a connected band are marked LIVE.</p>
               </div>
             </div>
 
@@ -275,6 +315,17 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
+                  {patients.filter((p) => p.risk_level !== 'low').length === 0 && (
+                    <tr>
+                      <td colSpan={4}>
+                        <div className="empty-state">
+                          {patients.length === 0
+                            ? 'No patients to show yet.'
+                            : 'All patients are currently low risk.'}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {patients
                     .filter((p) => p.risk_level !== 'low')
                     .map((p, i) => (
@@ -285,7 +336,10 @@ function App() {
                               {p.name[0]}
                             </div>
                             <div>
-                              <div className="patient-name">{p.name}</div>
+                              <div className="patient-name">
+                                {p.name}
+                                {p.live && <span className="live-chip">LIVE</span>}
+                              </div>
                               <div className="patient-id">ID: {p.id.slice(0, 8)}</div>
                             </div>
                           </div>
@@ -306,7 +360,9 @@ function App() {
             <div className="page-header">
               <div>
                 <h1 className="page-title">All Patients</h1>
-                <p className="page-subtitle">{patients.length} live {patients.length === 1 ? 'patient' : 'patients'} connected</p>
+                <p className="page-subtitle">
+                  {patients.length} enrolled &middot; {liveCount} with a connected band
+                </p>
               </div>
             </div>
 
@@ -323,6 +379,24 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
+                  {patients.length === 0 && !loading && (
+                    <tr>
+                      <td colSpan={6}>
+                        <div className="empty-state">
+                          {error
+                            ? 'No data - the backend is not reachable.'
+                            : 'No patients enrolled yet. Use "Enroll Patient" to add one.'}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  {loading && patients.length === 0 && (
+                    <tr>
+                      <td colSpan={6}>
+                        <div className="empty-state">Loading patients...</div>
+                      </td>
+                    </tr>
+                  )}
                   {patients.map((p, i) => (
                     <tr key={p.id} onClick={() => openPatient(p.id)}>
                       <td>
@@ -331,7 +405,10 @@ function App() {
                             {p.name[0]}
                           </div>
                           <div>
-                            <div className="patient-name">{p.name}</div>
+                            <div className="patient-name">
+                              {p.name}
+                              {p.live && <span className="live-chip">LIVE</span>}
+                            </div>
                             <div className="patient-id">ID: {p.id.slice(0, 8)}</div>
                           </div>
                         </div>
@@ -464,7 +541,6 @@ function App() {
                       <th>Timestamp</th>
                       <th>Heart Rate</th>
                       <th>SpO2</th>
-                      <th>Temperature</th>
                       <th>Blood Pressure</th>
                       <th>Steps</th>
                     </tr>
@@ -482,7 +558,10 @@ function App() {
                             </span>
                           </td>
                           <td>{v.spo2}%</td>
-                          <td>{v.systolic_bp}/{v.diastolic_bp}</td>
+                          <td>
+                            {v.systolic_bp}/{v.diastolic_bp}
+                            <div className="cell-note">manual entry</div>
+                          </td>
                           <td>{v.steps?.toLocaleString() || '—'}</td>
                         </tr>
                       );

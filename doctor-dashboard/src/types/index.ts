@@ -8,6 +8,8 @@ export interface Patient {
   risk_level: 'low' | 'medium' | 'high' | 'critical';
   assigned_doctor: string;
   blood_group?: string;
+  // true when the wearable band is currently reporting for this patient
+  live?: boolean;
 }
 
 export interface Vital {

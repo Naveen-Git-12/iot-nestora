@@ -750,3 +750,41 @@
   margin-top: 10px; padding-top: 10px; font-size: 13px;
   border-top: 1px solid rgba(0,0,0,.08); color: #40404F;
 }
+
+/* ── states added for patient-list visibility ─────────────────────────────── */
+.live-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+.empty-state {
+  padding: 28px 16px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.alert-banner {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cell-note {
+  font-size: 11px;
+  color: #94a3b8;
+}
